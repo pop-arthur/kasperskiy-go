@@ -199,5 +199,6 @@ Unit tests в internal/usecase выполняются без PostgreSQL. Исп�
 
 Три сценария и их unit/integration tests реализованы без новых зависимостей.
 Unit tests выполняются обычным go test ./..., в том числе с -race.
-HTTP transport, подключение/жизненный цикл пула и сборка сервера остаются
-отдельными задачами. OpenAPI, repository и миграции не изменены.
+HTTP transport, подключение/жизненный цикл пула и сборка сервера реализованы
+следующими этапами; детали — [RUNTIME.md](RUNTIME.md). Контракт сервиса,
+repository и SQL-миграции при runtime wiring не изменены.

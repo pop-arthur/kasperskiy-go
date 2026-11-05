@@ -1,14 +1,12 @@
 # Архитектура
 
-## Реализовано на этапе Bootstrap
+## Текущее состояние
 
-Один модуль `kasperski-go-test`; после Bootstrap добавлен pgx/v5 v5.12.0
-для PostgreSQL-адаптера (ADR-010). `cmd/api/main.go`
-проверяет LOG_LEVEL, создаёт JSON-логгер slog и завершает процесс с кодом 0.
-Некорректный LOG_LEVEL даёт JSON-ошибку в stderr и код 1. HTTP-сервер не
-запускается. При WARN/ERROR информационное сообщение подавляется.
-Docker собирает статический бинарник и запускает его непривилегированным
-пользователем в scratch. Сейчас контейнер также сразу завершается.
+Один модуль kasperski-go-test, PostgreSQL-адаптер на pgx/v5 v5.12.0.
+cmd/api читает/проверяет окружение, создаёт JSON logger и пул, проверяет
+соединение/схему, собирает repository → service → HTTP и запускает сервер.
+[Runtime](backend/RUNTIME.md) и ADR-013 описывают startup/shutdown и defaults.
+Docker: статический бинарник, scratch, UID/GID 65532 и системный CA bundle.
 
 ## Архитектура: реализованное и планируемое
 
@@ -18,12 +16,12 @@ Docker собирает статический бинарник и запуск�
 | Путь | Ответственность и статус |
 | --- | --- |
 | `cmd/api` | Composition root: чтение конфигурации, сборка зависимостей, жизненный цикл процесса |
-| `internal/config` | Планируется: чтение и проверка окружения для сервера |
+| `internal/config` | Реализованы Load(), defaults, валидация HTTP/PostgreSQL и безопасная сборка URL |
 | `internal/domain` | Реализовано: MD5, ThreatData, Threat, валидация и ошибки без HTTP/SQL |
 | `internal/usecase` | Реализованы ThreatRepository и ThreatService: GetByMD5/Create/Update с валидацией и unit tests |
 | `internal/repository/postgres` | Реализованы GetByMD5/Create/Update на pgxpool; уникальность MD5 обеспечивает БД |
-| `internal/transport/http` | Планируется: HTTP-маршрутизация, DTO и преобразование ошибок |
-| `tests/integration` | Реализованы SQL/Compose, repository и service + PostgreSQL tests; HTTP tests планируются |
+| `internal/transport/http` | Реализованы маршруты, DTO/decoder/writer, ошибки, recovery/logging и httptest |
+| `tests/integration` | Реализованы SQL/Compose и цепочка HTTP → service → repository → PostgreSQL |
 
 Подпакеты handler/middleware и infrastructure создавать только при
 необходимости. Сейчас их нет. Не размещать интерфейс репозитория в
@@ -37,7 +35,7 @@ DI-контейнер и глобальные зависимости не нуж
 Предполагаемый поток: HTTP → декодирование/валидация DTO → usecase →
 интерфейс хранилища → адаптер → результат → HTTP-ответ по OpenAPI.
 Будущая маршрутизация — stdlib net/http, если контракт не потребует иного.
-Хранение и usecase-сценарии реализованы; сервер и HTTP transport ещё отсутствуют.
+Весь поток собран в cmd/api; процесс/Compose проверены отдельно от httptest.
 
 ## Контракт repository layer
 
@@ -68,13 +66,39 @@ transport; даты/NULL/уникальность обеспечивает repos
 HTTP, retry, транзакции и жизненный цикл пула в сервис не добавляются.
 Решение зафиксировано в ADR-011.
 
+## HTTP-слой
+
+[Спецификация HTTP](backend/HTTP.md) реализована и проверена (ADR-012).
+Один пакет internal/transport/http (httptransport): router, handlers,
+DTO, decoder, JSON writer/error mapping и recovery/logging. Локальный
+интерфейс ThreatService совпадает с тремя методами usecase; зависимости
+передаются NewHandler(service, logger, maxBodyBytes), без доступа к repository.
+
+POST/PUT проверяют JSON/обязательность/null до вызова сервиса. Decoder
+использует ограниченное тело и map[string]json.RawMessage: известные имена
+case-sensitive, неизвестные поля игнорируются. Сервис остаётся единственным
+местом вызова доменной валидации. DTO ответа отделены от domain; description
+сохраняет nil/пустую строку, даты приводятся к UTC. Ошибки возвращаются
+через единый JSON writer без утечки технических подробностей.
+
+Проектные решения: default тела 1 MiB, JSON Content-Type/UTF-8, 400 для
+ошибок формы/media type/размера, JSON fallback 404 и method 405 с Allow.
+Это дополнение HTTP-проекта, не исходные требования ТЗ. Пути/статусы
+трёх операций OpenAPI остаются прежними. Конфигурация сервера и wiring
+реализованы в cmd/api и internal/config. Handlers подключены через
+NewHandler, HTTP-порт открывается после успешной проверки БД/миграции.
+
 ## Конфигурация и логирование
 
-Сейчас используется только LOG_LEVEL (по умолчанию INFO), поддерживаются
-уровни стандартного slog, в примерах DEBUG/INFO/WARN/ERROR. `.env.example`
-служит справочником; приложение автоматически .env не читает.
-Параметры HTTP и хранилища добавлять вместе с их реализацией. Ошибки
-конфигурации должны приводить к завершению до запуска сервера.
+internal/config.Load читает LOG_LEVEL, HTTP_* и POSTGRES_*; defaults
+и правила описаны в RUNTIME.md и .env.example. Только unset получает
+default; явно пустое значение — ошибка. Пароль обязателен и не обрезается.
+Приложение .env не читает, Compose читает. Config не импортирует pgx: URL
+строится через net/url, пул создаётся composition root. Ошибки конфигурации
+завершают startup до открытия HTTP listener.
+Fatal startup/shutdown пишется один раз JSON в stderr независимо от LOG_LEVEL;
+остальные события — через настроенный stdout logger. ErrorLog net/http также
+направлен в slog. Конфигурация/DSN целиком не логируются.
 JSON structured logs через log/slog. Логгер передавать явно; будущие ошибки
 запросов логировать один раз на границе, не выводить секреты/сырые тела.
 
@@ -88,23 +112,24 @@ errors.Is/As. Transport сопоставит их с 400/404/409/500 и JSON mes
 
 ## Тестирование
 
-Unit-тесты Go проверяют domain.ParseMD5, ThreatData.Validate и все три
-сценария ThreatService на ручном fake репозитория, без БД.
-make test-repository проверяет Go-адаптер и цепочку service → repository
-с реальной PostgreSQL, включая
+Unit-тесты Go проверяют domain, сервис и HTTP transport на ручных fake,
+без БД. HTTP проверяется через ResponseRecorder и реальный httptest.Server
+для HEAD, chunked/частичного ответа и прерывания потока.
+make test-integration (алиас make test-repository) проверяет Go-адаптер
+и цепочку HTTP → service → repository с реальной PostgreSQL, включая
 гонки Create/Update, ошибки, NULL, UTC, context и deadline; включён -race.
 Пул создаёт тест, миграцию применяет изолированный Compose-runner.
 Есть make test-db: Python stdlib + Docker Compose проверяют реальные
 up/down-миграции, ограничения и сохранность данных после пересоздания
 контейнеров. Используется отдельный проект, порт и том; обычная БД не затрагивается.
-Unit tests сервиса уже реализованы через testing; transport tests на
-httptest будут добавлены с HTTP-слоем. Тестовые реализации
+Unit tests сервиса и transport реализованы через testing/httptest. Тестовые реализации
 интерфейса писать вручную, когда это проще зависимости.
 В tests/integration есть check_database.py, schema.sql, repository_test.go
-и service_test.go.
+service_test.go, http_test.go и runtime_checks.py.
 Go integration tests включаются тегом integration и требуют отдельной
-тестовой TEST_DATABASE_URL; make test-repository создаёт её автоматически.
-Тесты цепочки HTTP → хранение, дубликатов и обновлений будут добавлены с API.
+тестовой TEST_DATABASE_URL; make test-integration создаёт её автоматически.
+HTTP integration tests проверяют все шесть кодов операций, в том числе
+500 на закрытом пуле, duplicate, NULL и отсутствие upsert.
 Они должны иметь документированный отдельный запуск и изоляцию данных;
 обычный go test ./... не должен неожиданно требовать внешнюю БД.
 Фиксировать ожидаемое поведение по контракту, не повторять реализацию в тестах.
@@ -119,8 +144,9 @@ Go integration tests включаются тегом integration и требую
 отсутствующее description сбрасывается в NULL. Даты только серверные,
 выдаются в ответах; неизвестные поля запросов игнорируются.
 Таблица реализована миграцией 000001_create_threats, БД запускается
-через Compose. Адаптер реализован; composition root пока не создаёт пул,
-Go-приложение по-прежнему выполняет только Bootstrap.
+через Compose. Composition root владеет пулом: общий startup budget
+включает Ping и проверку миграции 1/dirty=false/SELECT threats. DDL не
+выполняется; при ошибке процесс завершается с рекомендацией make migrate-up.
 
 ## Инфраструктура и границы
 
@@ -143,6 +169,15 @@ make db-up ждёт готовности БД; миграции применяю
 Драйвер внесён в go.mod/go.sum. Конструктор принимает готовый ненулевой
 пул; не создаёт подключения, не проверяет env и не закрывает пул. CLI мигратора
 не встраивается в сервер и не является его Go-зависимостью.
-API в Compose пока не добавлен: текущий бинарник сразу завершается. Dockerfile
-копирует cmd/internal, использует go.mod/go.sum и go mod download.
-Миграции и OpenAPI при реализации адаптера не изменялись.
+API добавлен в Compose: 0.0.0.0:8080 → 127.0.0.1:API_PORT, БД postgres:5432.
+make up запускает БД, мигратор и API последовательно. make down сохраняет том,
+make logs показывает API; stop_grace_period=30s. Dockerfile копирует cmd/internal
+и CA bundle, использует go.mod/go.sum и go mod download.
+
+На сигнал Shutdown закрывает listener и ждёт запросы в отдельном контексте.
+BaseContext запросов независим от сигнала; только по истечении shutdown timeout
+запросы отменяются и HTTP закрывается принудительно. Пул закрывается после
+остановки сервера. Нормальный exit 0, ошибка/timeout — exit 1.
+
+make test-runtime проверяет настоящий процесс и контейнеры; make test-integration
+продолжает проверять 13 Go integration tests. Миграции и OpenAPI не менялись.

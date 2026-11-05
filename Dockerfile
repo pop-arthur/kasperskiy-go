@@ -9,5 +9,6 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api
 
 FROM scratch
 COPY --from=build /out/api /api
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 65532:65532
 ENTRYPOINT ["/api"]

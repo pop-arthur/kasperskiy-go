@@ -15,15 +15,22 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repository", action="store_true", help="run Go repository tests instead of migration smoke tests")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--runtime", action="store_true", help="check the real API process and Compose deployment")
+    group.add_argument("--integration", "--repository", dest="integration", action="store_true", help="run Go integration tests instead of migration smoke tests")
     args = parser.parse_args()
     project = "threats-check-" + uuid.uuid4().hex[:12]
-    env = dict(os.environ)
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("POSTGRES_", "HTTP_", "PG"))
+        and key not in {"API_PORT", "LOG_LEVEL", "COMPOSE_PROFILES", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_ENV_FILES"}
+    }
     env.update(
         POSTGRES_DB="threats_test",
         POSTGRES_USER="threats_test",
         # Special characters verify that credentials are not interpolated into a URL.
         POSTGRES_PASSWORD=secrets.token_hex(16) + "@:/?#",
+        API_PORT="0",
         POSTGRES_PORT="0",  # Docker assigns an available loopback port.
     )
     with tempfile.TemporaryDirectory(prefix="threats-check-") as directory:
@@ -63,9 +70,13 @@ def main():
             run("config", "--quiet")
             run("up", "-d", "--wait", "postgres")
             assert sql("SHOW server_version;").startswith("18.6"), "Wrong PostgreSQL version"
+            if args.runtime:
+                from runtime_checks import verify_runtime
+                verify_runtime(ROOT, directory, env, compose, run, migrate, sql)
+                return
             migrate("up")
             assert sql("SELECT version, dirty FROM public.schema_migrations;") == "1|f"
-            if args.repository:
+            if args.integration:
                 address = run("port", "postgres", "5432")
                 port = address.rsplit(":", 1)[1]
                 test_env = dict(env)

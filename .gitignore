@@ -9,3 +9,6 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Python runners for integration/runtime checks.
+__pycache__/

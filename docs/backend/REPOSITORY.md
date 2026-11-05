@@ -197,7 +197,8 @@ NewThreatRepository принимает caller-owned *pgxpool.Pool. Ожидае�
 запись до обнаружения разрыва соединения. Автоповторов нет.
 
 Usecase-сценарии реализованы поверх этого контракта (см. SERVICE.md).
-Далее — подключение/жизненный цикл пула в composition root и HTTP transport. OpenAPI, схема таблицы и миграции не изменены.
+HTTP transport и lifecycle пула в composition root реализованы;
+подробности — [RUNTIME.md](RUNTIME.md). OpenAPI, схема таблицы и миграции не изменены.
 
 Справочные источники технических деталей:
 

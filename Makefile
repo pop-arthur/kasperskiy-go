@@ -4,7 +4,7 @@ IMAGE ?= kasperski-go-test:local
 
 .PHONY: help fmt vet test check build run docker-build docker-run
 help:
-	@echo "Targets: fmt vet test check build run docker-build docker-run db-up db-down db-shell migrate-up migrate-down migrate-version test-db test-repository"
+	@echo "Targets: fmt vet test check build run docker-build docker-run db-up db-down db-shell migrate-up migrate-down migrate-version test-db test-repository test-integration up down logs test-runtime"
 
 fmt:
 	$(GO) fmt ./...
@@ -30,14 +30,13 @@ run:
 docker-build:
 	docker build -t $(IMAGE) .
 
-docker-run:
-	docker run --rm -e LOG_LEVEL $(IMAGE)
+docker-run: up
 
 # Override COMPOSE to use a separate project or env file.
 COMPOSE ?= docker compose
 MIGRATE = $(COMPOSE) run --rm migrate -path /migrations -database 'postgres://postgres:5432/?sslmode=disable'
 
-.PHONY: db-up db-down db-shell migrate-up migrate-down migrate-version test-db test-repository
+.PHONY: db-up db-down db-shell migrate-up migrate-down migrate-version test-db test-repository test-integration
 
 db-up:
 	$(COMPOSE) up -d --wait postgres
@@ -62,5 +61,24 @@ test-db:
 	python3 tests/integration/check_database.py
 
 # Requires Docker Compose and Python 3; creates and removes an isolated test DB.
-test-repository:
-	python3 tests/integration/check_database.py --repository
+test-repository: test-integration
+
+test-integration:
+	python3 tests/integration/check_database.py --integration
+
+.PHONY: up down logs test-runtime
+
+# Keep migrations explicit, ordered, and outside application startup.
+up:
+	$(MAKE) db-up
+	$(MAKE) migrate-up
+	$(COMPOSE) up -d --build api
+
+down:
+	$(COMPOSE) down
+
+logs:
+	$(COMPOSE) logs -f api
+
+test-runtime:
+	python3 tests/integration/check_database.py --runtime

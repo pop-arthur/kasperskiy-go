@@ -48,18 +48,22 @@
 
 ## 4. HTTP и запуск
 
-- [ ] Реализовать только три заданных маршрута, DTO и единые ошибки по OpenAPI; httptest для статусов и JSON.
-- [ ] Добавить серверную конфигурацию через окружение и проверки её корректности.
-- [ ] Собрать зависимости конструкторами в cmd/api; реализовать запуск и корректное завершение HTTP-сервера.
+- [x] Спроектировать HTTP layer в docs/backend/HTTP.md (ADR-012): package/API, маршруты, DTO, decoder, ошибки, context, logging/recovery и критерии тестов.
+- [x] Реализовать DTO/ограниченный JSON decoder/writer и httptest для отсутствующих/null/неверных полей, unknown fields, Content-Type и лимита тела по HTTP.md.
+- [x] При реализации дополнить OpenAPI пояснениями HTTP-политики маршрутизации и разбора запросов, сохранив три операции и их коды.
+
+- [x] Реализовать только три заданных маршрута, DTO и единые ошибки по OpenAPI; httptest для статусов и JSON.
+- [x] Добавить серверную конфигурацию через окружение и проверки её корректности.
+- [x] Собрать зависимости конструкторами в cmd/api; реализовать запуск и корректное завершение HTTP-сервера.
 - [x] Обновить Dockerfile для internal и go.mod/go.sum, проверить Docker-сборку.
-- [ ] Добавить API в существующий Compose после реализации сервера. PostgreSQL и мигратор уже добавлены.
+- [x] Добавить API в существующий Compose после реализации сервера. PostgreSQL и мигратор уже добавлены.
 
 ## 5. Приёмка реализации
 
-- [ ] Добавить изолированные integration tests API с выбранным реальным хранилищем; отдельная воспроизводимая команда.
-- [ ] Проверить 200/201/400/404/409/500, ошибочный JSON и MD5, дубликаты и семантику PUT по контракту.
-- [ ] Проверить отсутствие утечек внутренних ошибок и чувствительных данных в ответах/логах.
-- [ ] Обновить README с реальным запуском сервиса и примерами API, выполнить fmt/vet/test/build и Docker smoke check.
+- [x] Добавить изолированные integration tests API с выбранным реальным хранилищем; отдельная воспроизводимая команда.
+- [x] Проверить 200/201/400/404/409/500, ошибочный JSON и MD5, дубликаты и семантику PUT по контракту.
+- [x] Проверить отсутствие утечек внутренних ошибок и чувствительных данных в ответах/логах.
+- [x] Обновить README с реальным запуском сервиса и примерами API, выполнить fmt/vet/test/build и Docker smoke check.
 - [ ] Сверить результат с исходным заданием и закрыть только проверенные задачи.
 
 ## Проверки Bootstrap
@@ -262,3 +266,101 @@ GetByMD5/Create/Update, ctx.Err на входе, ParseMD5 и Validate перед
 SQL-миграции и Compose не изменены. Docker и migration smoke tests отдельно
 не повторялись: их конфигурация и SQL не менялись; новая цепочка проверена
 существующим изолированным runner на той же миграции.
+
+## Проект HTTP layer — 2026-11-05
+
+Создан docs/backend/HTTP.md: один пакет httptransport, consumer interface
+ThreatService и NewHandler, path-only ServeMux с явными методами, DTO,
+ограниченный JSON decoder, отсутствие/null/строки и unknown fields,
+централизованный JSON/error writer, context, recovery и slog.
+Проектные HTTP-решения (1 MiB, Content-Type, 400 для неверного тела/media,
+404/405 маршрутизации) отделены от требований исходного задания.
+Описаны критерии httptest и будущих HTTP → service → PostgreSQL tests.
+Добавлен ADR-012, обновлены архитектура, AGENTS, README и ограничения этапа.
+
+Проверки: сопоставление с API 1.1.0, сигнатурами сервиса и его правилами
+валидации; технические особенности ServeMux/MaxBytesReader/encoding-json
+и ParseMediaType сверены с документацией stdlib. Локальные Markdown-ссылки
+и whitespace корректны; make check (fmt/vet/test) прошёл.
+HTTP-код, OpenAPI, сервис, repository, SQL, Compose и зависимости не менялись.
+Интеграционные тесты БД повторно не запускались: изменена только документация.
+Готовность HTTP-реализации и её тестов не заявляется.
+
+
+## Реализация HTTP layer — 2026-11-05
+
+Реализован internal/transport/http (httptransport): NewHandler от локального
+интерфейса сервиса, ServeMux и явные методы, DTO, ограниченный JSON decoder,
+единый writer/error mapping, response state, recovery и slog logging.
+Доменную проверку вызывает существующий сервис; прямой связи HTTP с pgx нет.
+Проверяются точные имена/присутствие/типы/null до преобразования DTO;
+unknown fields игнорируются, nil/пустое описание различаются.
+
+В OpenAPI info.description добавлены пояснения политики media type/размера,
+405/Allow, HEAD и канонизации URL. Схемы, пути и коды трёх операций сохранены.
+Добавлен HTTP → service → repository → PostgreSQL test, проверяющий
+200/201/400/404/409/500, uppercase duplicate, очистку описания и отсутствие upsert.
+make test-integration запускает весь suite; make test-repository сохранён как алиас.
+
+Фактические проверки:
+
+| Проверка | Результат |
+| --- | --- |
+| make check | fmt/vet/test прошли |
+| go test -race ./... | Все unit tests прошли, гонок нет |
+| make test-integration | 13 Go integration tests прошли на PostgreSQL 18.6 с -race; собственный проект/том удалены |
+| HTTP protocol tests | HEAD без тела/вызова сервиса, размер chunked body, panic до/после начала ответа, ошибка/short write и отсутствие второго JSON проверены |
+| HTTP data/error tests | DTO/UTC/NULL, required/type/null, unknown/duplicate/case-sensitive fields, Content-Type, context, безопасные ошибки и однократный Error log проверены |
+| go vet -tags=integration ./... | Успех |
+| make build | Успех |
+| OpenAPI | Валидна по openapi-spec-validator; сравнение с git подтверждает изменение только info.description |
+| Документация | Локальные Markdown-ссылки и whitespace проверены |
+
+Обновлены HTTP, ARCHITECTURE, REQUIREMENTS, AGENTS, ADR-012 и README.
+Новых Go-зависимостей нет. Сервис, repository, миграции, Compose и cmd/api
+не изменены. Handler доступен для подключения, но production сервер пока
+не запускается; конфигурация, lifecycle/wiring и API в Compose не завершены.
+Текущие integration tests используют httptest.Server, не cmd/api.
+
+
+## Runtime, сервер и Compose — 2026-11-05
+
+Реализован утверждённый пользователем план. internal/config.Load читает
+окружение и проверяет defaults/пустые значения/диапазоны/duration/SSL/адреса,
+формирует безопасный URL. cmd/api создаёт пул, проверяет Ping, миграцию 1,
+dirty=false и доступность threats до открытия listener; DDL не выполняет.
+Собраны repository → service → HTTP и настоящий сервер с timeouts.
+
+На SIGINT/SIGTERM выполняется drain на отдельном context; request BaseContext
+не отменяется сигналом до истечения shutdown timeout. При timeout — отмена
+запросов и Close, затем закрытие пула. Exit 0 штатный, ошибки startup/shutdown
+дают 1. Fatal JSON stderr не подавляется LOG_LEVEL, в том числе ERROR+1;
+ErrorLog net/http направлен в slog. Пароль/DSN не выводятся.
+
+Добавлены API в Compose, stop_grace_period=30s, CA bundle в scratch,
+make up/down/logs, docker-run → up и make test-runtime. make up выполняет
+проверенный порядок db-up → migrate-up → api up --build; down сохраняет том.
+Обновлены .env.example, README с curl-примерами, AGENTS, архитектура,
+требования, контракты и ADR-013/RUNTIME.md. Python cache исключён из Git.
+
+Фактические проверки итоговой версии:
+
+| Проверка | Результат |
+| --- | --- |
+| make check | fmt/vet/unit tests прошли |
+| go test -race ./... | Config, lifecycle, domain, service и HTTP unit tests прошли, гонок нет |
+| make test-integration | 13 существующих Go integration tests прошли на PostgreSQL 18.6 с -race |
+| make test-runtime: startup failures | Отсутствие/dirty/другая версия схемы, недоступная таблица, ошибка config, соединения и занятый порт дают exit 1, один Error log, без утечки пароля и открытия HTTP |
+| make test-runtime: process | Настоящий бинарник POST/GET/PUT; SIGTERM/SIGINT дают exit 0; порт освобождён |
+| Lifecycle unit tests | Listener освобождается, in-flight запрос заканчивается после сигнала, по timeout context отменён и соединение закрыто |
+| make test-runtime: Compose | make up/down, Docker build/HTTP, сохранность данных после пересоздания контейнеров, stop API с exit 0 прошли |
+| make test-db | Up/повторный up, constraints/default, persistence и down/up прошли |
+| make build / make docker-build | Успех; текущий bin/api и локальный образ собраны |
+| go vet -tags=integration ./... / go mod verify | Успех |
+| Документация | Локальные ссылки/whitespace и git diff --check прошли |
+
+Тесты использовали отдельные случайные Compose-проекты, порты и тома;
+контейнеры/сети/тома удалены в finally, обычная БД пользователя не затронута.
+Новых Go-зависимостей, SQL-миграций, endpoints и изменений бизнес-контракта нет.
+Оригинальный документ Kaspersky всё ещё отсутствует: его сверка остаётся
+открытой задачей и не отмечена завершённой.

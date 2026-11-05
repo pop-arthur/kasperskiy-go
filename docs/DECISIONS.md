@@ -232,3 +232,80 @@
   service + PostgreSQL test выполнены. Сервис передаёт ошибки без повторной
   обёртки, сохраняя errors.Is/As; новых архитектурных слоёв и зависимостей нет.
   HTTP API, подключение пула и сервер пока не реализованы.
+
+
+## ADR-012 — Проект HTTP layer на стандартной библиотеке
+
+- Решение: один пакет internal/transport/http (httptransport), локальный
+  интерфейс ThreatService и NewHandler(service, logger, maxBodyBytes).
+  Стандартный ServeMux с path-only ресурсами и явной проверкой методов;
+  три handler, отдельные DTO и общий decoder/JSON writer. Полный проект —
+  [HTTP.md](backend/HTTP.md).
+- Причина: готовый сервис покрывает сценарии; transport должен проверять
+  форму JSON и отображать результат в протокол. RawMessage сохраняет
+  возможность отличить отсутствие/null/строку и проверить точные имена
+  без case-insensitive matching struct decoder. Unknown fields разрешены.
+  Единый writer обеспечивает JSON message/details и отсутствие утечек.
+- Альтернативы: Chi/Gin и generated server пока не требуются; прямое
+  кодирование domain смешивает модель и JSON. DisallowUnknownFields
+  нарушает контракт. Методовые GET-patterns ServeMux не выбраны из-за
+  неявного HEAD и необходимости контролировать JSON 405.
+- Проектные уточнения: ограниченное тело с default 1 MiB; JSON Content-Type,
+  charset UTF-8 и отсутствие сжатия; ошибки формы/media type/размера — 400
+  в рамках текущего API, без молчаливого добавления 413/415. Для неизвестных
+  путей JSON 404, неподдержанных методов — 405/Allow (HEAD без тела).
+  Эти правила не заявляются исходными требованиями Kaspersky.
+- Компромиссы: чтение запроса в памяти ограничено maxBodyBytes;
+  JSON-ответ предварительно кодируется в памяти без отдельного лимита.
+  Размеры отдельных полей не ограничиваются доменом. Дубликаты ключей
+  используют последнее значение RawMessage по encoding/json v1, без
+  отдельного строгого JSON-парсера. Сохраняются стандартные redirect ServeMux
+  для неканонических путей. Некорректные HTTP-запросы до входа в handler
+  и отключённый клиент не имеют гарантированного JSON-ответа.
+  Context errors не вводят 499/504: доставка зависит от состояния запроса,
+  при доступном ответе внутренние ошибки дают 500. Recovery не дописывает
+  JSON после начала ответа; access log не дублирует лог причины ошибки.
+- Статус: спроектировано и реализовано 2026-11-05 по отдельному запросу.
+  Transport проверен unit tests и через настоящий HTTP-клиент + PostgreSQL
+  с -race. OpenAPI дополнена пояснениями, три операции/схемы/коды сохранены.
+  NewHandler паникует при nil service/logger или неположительном лимите
+  (проверка конфигурации должна предшествовать запуску). Неожиданные ошибки
+  фиксируются в локальном response state и логируются один раз при завершении
+  запроса; recovery не выводит произвольное panic-значение.
+  Серверная конфигурация и production wiring остаются следующими задачами.
+
+
+## ADR-013 — Конфигурация, startup, lifecycle и Compose API
+
+- Решение: реализовать утверждённый пользователем runtime-план. internal/config
+  читает/валидирует окружение без dotenv, cmd/api владеет pgxpool и listener,
+  собирает repository → service → HTTP, запускает http.Server. Defaults и
+  интерфейсы конфигурации описаны в [RUNTIME.md](backend/RUNTIME.md).
+- Причина: готовые слои требовали запуска настоящего процесса и воспроизводимой
+  сборки всего сервиса. URL credentials формируются net/url; конфигурационные
+  ошибки называют переменную без её значения. POSTGRES_* сохранены для
+  совместимости с текущим локальным окружением и Compose.
+- Startup: общий timeout 5s по умолчанию включает Ping и проверку единственной
+  миграции 1 с dirty=false, SELECT threats доступен. DDL и auto-force запрещены.
+  Порт открывается только после проверки; ошибки завершают процесс с exit 1.
+- Lifecycle: request BaseContext независим от signal context. Shutdown с отдельным
+  timeout сначала останавливает приём и ждёт in-flight запросы; при timeout
+  отменяет request contexts и вызывает Close. Пул закрывается последним.
+  Штатные SIGINT/SIGTERM — exit 0, timeout/ошибка — exit 1. Fatal log — один JSON
+  stderr независимо от LOG_LEVEL, остальные события — configured stdout slog.
+- Compose: make up последовательно db-up → migrate-up → api up --build.
+  API внутри 0.0.0.0:8080/postgres:5432, публикация 127.0.0.1:API_PORT;
+  make down сохраняет том, make logs показывает API, docker-run — алиас up.
+  stop_grace_period=30s, shutdown default=10s. Runtime scratch/UID 65532
+  сохраняется, системный CA bundle копируется для TLS PostgreSQL.
+- Альтернативы: автоматические миграции в API нарушают отдельный lifecycle;
+  signal context в BaseContext отменяет текущие запросы до drain;
+  dotenv и framework для config/DI не нужны; health endpoint не требуется.
+- Компромиссы: локальный MVP использует существующую административную роль
+  POSTGRES_USER и SSL disable. Production-роли, TLS HTTP и дополнительные
+  endpoints вне задачи. Текущая версия схемы требует явного пересмотра при
+  новых миграциях. HTTP timeouts не вводят deadline сервисного запроса.
+  Compose grace period нужно увеличить при увеличении shutdown timeout.
+- Статус: реализовано 2026-11-05. Добавлены config/lifecycle unit tests,
+  make test-runtime для бинарника и Compose. Новых зависимостей, миграций
+  и изменений API-контракта нет.
