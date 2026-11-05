@@ -1,0 +1,287 @@
+openapi: 3.0.0
+info:
+  title: Information Exchange Service
+  description: |-
+    API для обмена информацией об угрозах. MD5 принимается в любом регистре,
+    нормализуется к нижнему регистру и возвращается в канонической форме.
+    Известные строковые поля не принимают null и U+0000. Пустые строки и пробелы
+    в name/description допустимы и сохраняются без обрезки; лимит длины не задан.
+    Неизвестные поля JSON-запросов игнорируются и не сохраняются, включая
+    created_at/updated_at: даты назначает только сервер. Тело POST/PUT должно
+    содержать один JSON-объект. Пути и HTTP-коды исходного API сохранены.
+  version: 1.1.0
+paths:
+  /info/{md5}:
+    get:
+      summary: Получить информацию об угрозе по MD5
+      description: Возвращает угрозу по MD5. MD5 в ответе всегда в нижнем регистре. Не изменяет данные.
+      operationId: getInfoByMd5
+      parameters:
+        - name: md5
+          in: path
+          required: true
+          description: 'MD5-хеш: ровно 32 hex-символа; регистр не влияет на поиск. Пробелы не обрезаются.'
+          schema:
+            type: string
+            pattern: ^[a-fA-F0-9]{32}$
+            example: d41d8cd98f00b204e9800998ecf8427e
+            minLength: 32
+            maxLength: 32
+      responses:
+        '200':
+          description: Успешный ответ с информацией об угрозе
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreatResponse'
+        '404':
+          description: Угроза с указанным MD5 не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: 'Некорректный MD5: требуется ровно 32 шестнадцатеричных символа'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера; ответ не раскрывает SQL, секреты или детали инфраструктуры
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Обновить информацию об угрозе по MD5
+      description: |-
+        Полностью заменяет изменяемые поля существующей угрозы: name и description.
+        Если description отсутствует, прежнее описание удаляется (SQL NULL),
+        а поле description опускается в ответе. Строка, включая пустую, сохраняется;
+        JSON null недопустим. MD5 задаётся только путём, md5/created_at не изменяются.
+        updated_at назначается сервером при каждом успешном PUT, даже без изменения
+        значений. Отсутствующая запись не создаётся. Конкурентные обновления используют
+        семантику последней успешной записи без проверки версии.
+      operationId: updateThreat
+      parameters:
+        - name: md5
+          in: path
+          required: true
+          description: 'MD5-хеш: ровно 32 hex-символа; регистр не влияет на поиск. Пробелы не обрезаются.'
+          schema:
+            type: string
+            pattern: ^[a-fA-F0-9]{32}$
+            example: d41d8cd98f00b204e9800998ecf8427e
+            minLength: 32
+            maxLength: 32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreatUpdateRequest'
+      responses:
+        '200':
+          description: Информация успешно обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreatResponse'
+        '400':
+          description: Некорректный MD5 или JSON, отсутствие обязательного поля, неверный тип, null либо
+            U+0000 в известном строковом поле
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Угроза с указанным MD5 не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера; ответ не раскрывает SQL, секреты или детали инфраструктуры
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /info:
+    post:
+      summary: Создать новую запись об угрозе
+      description: |-
+        Создаёт угрозу. Уникальность проверяется по нормализованному MD5,
+        поэтому различие только в регистре даёт 409. Дубликат не меняет запись.
+        Если description отсутствует, хранится SQL NULL и поле опускается в ответе.
+        created_at и updated_at назначаются сервером и при создании равны.
+      operationId: createThreat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreatCreateRequest'
+      responses:
+        '201':
+          description: Запись успешно создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreatResponse'
+        '400':
+          description: Некорректный MD5 или JSON, отсутствие обязательного поля, неверный тип, null либо
+            U+0000 в известном строковом поле
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Угроза с таким MD5 уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера; ответ не раскрывает SQL, секреты или детали инфраструктуры
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    ThreatCreateRequest:
+      type: object
+      required:
+        - md5
+        - name
+      properties:
+        md5:
+          type: string
+          pattern: ^[a-fA-F0-9]{32}$
+          description: Ровно 32 hex-символа в любом регистре. Перед сохранением нормализуется к нижнему
+            регистру; пробелы не обрезаются.
+          example: d41d8cd98f00b204e9800998ecf8427e
+          minLength: 32
+          maxLength: 32
+          nullable: false
+        name:
+          type: string
+          nullable: false
+          pattern: ^[^\u0000]*$
+          description: Название угрозы. Пустая строка и пробелы допустимы; без trim и лимита длины. U+0000
+            запрещён для совместимости с PostgreSQL text.
+          example: Trojan.Win32.Generic
+        description:
+          type: string
+          nullable: false
+          pattern: ^[^\u0000]*$
+          description: Описание угрозы. Необязательное поле; строка сохраняется без trim. Отсутствие означает,
+            что описания нет; null и U+0000 запрещены. Пустая строка отличается от отсутствия.
+          example: Вредоносная программа семейства Trojan.
+      additionalProperties: true
+      description: MD5 и name обязательны. description необязателен. Неизвестные поля игнорируются; клиентские
+        даты не используются.
+      example:
+        md5: D41D8CD98F00B204E9800998ECF8427E
+        name: Trojan.Win32.Generic
+        description: Вредоносная программа семейства Trojan.
+    ThreatUpdateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          nullable: false
+          pattern: ^[^\u0000]*$
+          description: Название угрозы. Пустая строка и пробелы допустимы; без trim и лимита длины. U+0000
+            запрещён для совместимости с PostgreSQL text.
+          example: Trojan.Win32.Generic
+        description:
+          type: string
+          nullable: false
+          pattern: ^[^\u0000]*$
+          description: Описание угрозы. Необязательное поле; строка сохраняется без trim. Отсутствие означает,
+            что описания нет; null и U+0000 запрещены. Пустая строка отличается от отсутствия.
+          example: Вредоносная программа семейства Trojan.
+      additionalProperties: true
+      description: Полная замена name и description. Отсутствие description удаляет прежнее описание.
+        Неизвестные поля, включая md5 и даты, игнорируются.
+      example:
+        name: Trojan.Win32.Updated
+    ThreatResponse:
+      type: object
+      properties:
+        md5:
+          type: string
+          pattern: ^[a-f0-9]{32}$
+          description: Канонический MD5 в нижнем регистре.
+          example: d41d8cd98f00b204e9800998ecf8427e
+          minLength: 32
+          maxLength: 32
+          nullable: false
+        name:
+          type: string
+          nullable: false
+          pattern: ^[^\u0000]*$
+          description: Название угрозы. Пустая строка и пробелы допустимы; без trim и лимита длины. U+0000
+            запрещён для совместимости с PostgreSQL text.
+          example: Trojan.Win32.Generic
+        description:
+          type: string
+          nullable: false
+          pattern: ^[^\u0000]*$
+          description: Описание угрозы. Необязательное поле; строка сохраняется без trim. Отсутствие означает,
+            что описания нет; null и U+0000 запрещены. Пустая строка отличается от отсутствия.
+          example: Вредоносная программа семейства Trojan.
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: false
+          description: Время создания записи, не время первого обнаружения угрозы. Не меняется при PUT.
+            Назначается БД; ответ RFC 3339 в UTC (суффикс Z).
+          example: '2026-11-05T10:00:00Z'
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: false
+          description: Время последнего успешного PUT; при создании равно created_at. Не является версией
+            записи или гарантированно возрастающей меткой. Назначается БД; ответ RFC 3339 в UTC (суффикс
+            Z).
+          example: '2026-11-05T10:00:00Z'
+      required:
+        - md5
+        - name
+        - created_at
+        - updated_at
+      additionalProperties: true
+      description: Угроза с каноническим MD5 и серверными датами. description отсутствует, если в БД NULL;
+        null в JSON не возвращается.
+      example:
+        md5: d41d8cd98f00b204e9800998ecf8427e
+        name: Trojan.Win32.Generic
+        description: Вредоносная программа семейства Trojan.
+        created_at: '2026-11-05T10:00:00Z'
+        updated_at: '2026-11-05T10:00:00Z'
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Человекочитаемое описание ошибки
+          example: Threat not found
+        details:
+          type: string
+          description: Дополнительная информация
+          example: No threat with MD5 d41d8cd98f00b204e9800998ecf8427e found
+      required:
+        - message
+        - details
+      additionalProperties: true
+      description: Оба поля всегда присутствуют и содержат строки. details может быть пустой строкой;
+        технические детали внутренних ошибок не раскрываются.
+      example:
+        message: Threat not found
+        details: No threat with MD5 d41d8cd98f00b204e9800998ecf8427e found
