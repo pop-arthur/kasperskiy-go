@@ -4,7 +4,7 @@ IMAGE ?= kasperski-go-test:local
 
 .PHONY: help fmt vet test check build run docker-build docker-run
 help:
-	@echo "Targets: fmt vet test check build run docker-build docker-run"
+	@echo "Targets: fmt vet test check build run docker-build docker-run db-up db-down db-shell migrate-up migrate-down migrate-version test-db"
 
 fmt:
 	$(GO) fmt ./...
@@ -32,3 +32,31 @@ docker-build:
 
 docker-run:
 	docker run --rm -e LOG_LEVEL $(IMAGE)
+
+# Override COMPOSE to use a separate project or env file.
+COMPOSE ?= docker compose
+MIGRATE = $(COMPOSE) run --rm migrate -path /migrations -database 'postgres://postgres:5432/?sslmode=disable'
+
+.PHONY: db-up db-down db-shell migrate-up migrate-down migrate-version test-db
+
+db-up:
+	$(COMPOSE) up -d --wait postgres
+
+db-down:
+	$(COMPOSE) down
+
+db-shell:
+	$(COMPOSE) exec postgres sh -c 'exec psql -X -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+
+migrate-up:
+	$(MIGRATE) up
+
+# Destructive: removes one migration, including its data. Run explicitly only.
+migrate-down:
+	$(MIGRATE) down 1
+
+migrate-version:
+	$(MIGRATE) version
+
+test-db:
+	python3 tests/integration/check_database.py

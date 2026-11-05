@@ -8,9 +8,9 @@ PUT /info/{md5}. Перед реализацией расширить модел
 Пересказ задания сохранён в docs/TASK_SOURCE.md, предоставленная OpenAPI —
 в docs/backend/openapi.yaml; оригинальный документ задания не предоставлен. Рекомендации из пересказа не равны требованиям.
 
-Текущий этап — Bootstrap завершает только подготовку: бизнес-логика,
-эндпоинты, обработчики и работа с БД не реализованы. Не приступать к ним
-в рамках запроса Bootstrap. Последующие изменения делать в объёме новой задачи.
+Bootstrap завершён; отдельной задачей добавлены SQL-миграция и запуск БД.
+Бизнес-логика, эндпоинты, обработчики и Go-адаптер ещё не реализованы.
+Последующие изменения делать в объёме новой задачи.
 
 ## Обязательный порядок работы
 
@@ -33,8 +33,14 @@ Docker multi-stage, статический бинарник, непривиле�
 БД v1 принята в docs/database/README.md (ADR-006): PostgreSQL, одна таблица
 threats, lowercase MD5, description и серверные created_at/updated_at.
 Контракт API 1.1.0 принят в docs/backend/openapi.yaml (ADR-007); исходник
-сохранён в openapi.original.yaml. Хранилище и API ещё не реализованы.
-Java/Spring из пересказа не применять.
+сохранён в openapi.original.yaml. Есть SQL-миграция и Compose для БД;
+Go-репозиторий и API ещё не реализованы. Выбраны PostgreSQL 18.6,
+pgx/v5 v5.12.0 и golang-migrate v4.20.1 (ADR-008). Драйвер добавлять в go.mod
+вместе с использующим его кодом; мигратор запускается отдельным контейнером.
+Контракт repository layer описан в docs/backend/REPOSITORY.md (ADR-009):
+GetByMD5/Create/Update, интерфейс у usecase, pgx-адаптер в repository/postgres;
+Go-интерфейс и типы пока не созданы. Перед реализацией репозитория прочитать
+этот контракт. Java/Spring из пересказа не применять.
 
 Сейчас cmd/api содержит только проверку LOG_LEVEL и JSON-логирование с
 завершением процесса. docs содержит требования, архитектуру, ADR, задачи
@@ -86,5 +92,15 @@ Unit tests писать рядом с проверяемым кодом, testing
 - make fmt, make vet, make test — отдельные проверки.
 - make docker-build, make docker-run — сборка/запуск Docker при работающем daemon.
 
-LOG_LEVEL по умолчанию INFO; .env.example не загружается автоматически.
+Команды БД: cp .env.example .env (если .env ещё нет), make db-up,
+make migrate-up, make migrate-version, make db-shell, make db-down.
+make migrate-down откатывает одну миграцию и удаляет её данные; выполнять
+только по явной задаче. db-down сохраняет том. make test-db запускает
+проверку схемы в отдельном случайно названном Compose-проекте и удаляет
+только его том; нужны Docker Compose и Python 3.
+
+LOG_LEVEL по умолчанию INFO. Go .env автоматически не читает; Compose читает.
+PostgreSQL 18 хранит данные в томе на /var/lib/postgresql.
+SQL в migrations — источник схемы; применённые миграции не менять,
+изменения схемы оформлять новой парой up/down.
 Результаты фактических проверок Bootstrap фиксируются в docs/TASKS.md.
