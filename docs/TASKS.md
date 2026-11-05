@@ -73,14 +73,14 @@
 | Проверка | Результат |
 | --- | --- |
 | Go toolchain | Go 1.27.3 darwin/arm64 скачана через GOTOOLCHAIN; глобальная Go 1.25.6 не изменена |
-| go.mod | go mod tidy без изменений; go list -m all выводит только kasperski-go-test; go.sum не нужен |
+| go.mod | go mod tidy без изменений; go list -m all выводит только kaspersky-go-test; go.sum не нужен |
 | go fmt ./... | Успех, форматирование применено |
 | go vet ./... | Успех |
 | go test ./... | Успех; cmd/api: [no test files] |
 | make build | Успех, bin/api (игнорируется Git) |
 | make run | Успех, JSON INFO, выход 0 |
 | Smoke бинарника | Default/DEBUG: JSON INFO, выход 0; WARN: тишина, выход 0; invalid/пустое значение: JSON ERROR, выход 1 |
-| make docker-build | Успех, kasperski-go-test:local |
+| make docker-build | Успех, kaspersky-go-test:local |
 | make docker-run | Успех, JSON INFO, выход 0 |
 | Smoke Docker | DEBUG: выход 0; invalid: выход 1; JSON корректен; runtime user 65532:65532 |
 | Структура и документы | Нет пустых пакетов и внешних сервисов; локальные Markdown-ссылки проверены; поведение и предложения из пересказа разделены |
@@ -364,3 +364,16 @@ make up/down/logs, docker-run → up и make test-runtime. make up выполн�
 Новых Go-зависимостей, SQL-миграций, endpoints и изменений бизнес-контракта нет.
 Оригинальный документ Kaspersky всё ещё отсутствует: его сверка остаётся
 открытой задачей и не отмечена завершённой.
+
+
+## Уточнение имени проекта — 2026-11-05
+
+- [x] Использовать kaspersky-go-test в go.mod, импортах кода/тестов,
+  имени Docker-образа Makefile и документации; ADR-002 актуализирован.
+- [x] Проверить fmt/vet/unit tests через make check и сборку make build.
+- [x] Проверить go vet -tags=integration ./... и компиляцию integration tests
+  через go test -tags=integration -run '^$' ./tests/integration.
+- [x] Подтвердить имя модуля собранного bin/api через go version -m.
+
+Проверки прошли. БД/Compose smoke tests повторно не запускались: изменены
+имена модуля/импорты/документация, поведение API и схема БД не менялись.

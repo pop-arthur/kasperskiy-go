@@ -1,4 +1,4 @@
-module kasperski-go-test
+module kaspersky-go-test
 
 go 1.27.3
 

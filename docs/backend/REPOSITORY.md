@@ -33,7 +33,7 @@ pgx, SQL, HTTP или конкретную реализацию repository.
 
 ```go
 // package usecase
-// context — стандартный пакет; domain — kasperski-go-test/internal/domain.
+// context — стандартный пакет; domain — kaspersky-go-test/internal/domain.
 type ThreatRepository interface {
     GetByMD5(ctx context.Context, md5 domain.MD5) (domain.Threat, error)
     Create(ctx context.Context, md5 domain.MD5, data domain.ThreatData) (domain.Threat, error)

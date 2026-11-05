@@ -13,10 +13,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"kasperski-go-test/internal/config"
-	"kasperski-go-test/internal/repository/postgres"
-	httptransport "kasperski-go-test/internal/transport/http"
-	"kasperski-go-test/internal/usecase"
+	"kaspersky-go-test/internal/config"
+	"kaspersky-go-test/internal/repository/postgres"
+	httptransport "kaspersky-go-test/internal/transport/http"
+	"kaspersky-go-test/internal/usecase"
 )
 
 func main() { os.Exit(run()) }

@@ -34,7 +34,7 @@ ThreatRepository уже определён в этом пакете; его си
 
 ```go
 // package usecase
-// context — стандартный пакет; domain — kasperski-go-test/internal/domain.
+// context — стандартный пакет; domain — kaspersky-go-test/internal/domain.
 type ThreatService struct {
     repository ThreatRepository
 }

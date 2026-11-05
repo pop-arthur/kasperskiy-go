@@ -15,9 +15,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"kasperski-go-test/internal/domain"
-	"kasperski-go-test/internal/repository/postgres"
-	"kasperski-go-test/internal/usecase"
+	"kaspersky-go-test/internal/domain"
+	"kaspersky-go-test/internal/repository/postgres"
+	"kaspersky-go-test/internal/usecase"
 )
 
 var _ usecase.ThreatRepository = (*postgres.ThreatRepository)(nil)

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 // ThreatService is the HTTP consumer's interface; it is implemented by usecase.ThreatService.

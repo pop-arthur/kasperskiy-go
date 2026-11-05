@@ -41,7 +41,7 @@ HTTP-коды и безопасное представление ошибок. �
 ```go
 // package httptransport
 // context, http и slog — стандартная библиотека;
-// domain — kasperski-go-test/internal/domain.
+// domain — kaspersky-go-test/internal/domain.
 type ThreatService interface {
     GetByMD5(ctx context.Context, md5 string) (domain.Threat, error)
     Create(ctx context.Context, md5 string, data domain.ThreatData) (domain.Threat, error)

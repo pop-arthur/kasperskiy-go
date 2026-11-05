@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 func TestEncodingFailureIsJSON500(t *testing.T) {

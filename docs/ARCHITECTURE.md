@@ -2,7 +2,7 @@
 
 ## Текущее состояние
 
-Один модуль kasperski-go-test, PostgreSQL-адаптер на pgx/v5 v5.12.0.
+Один модуль kaspersky-go-test, PostgreSQL-адаптер на pgx/v5 v5.12.0.
 cmd/api читает/проверяет окружение, создаёт JSON logger и пул, проверяет
 соединение/схему, собирает repository → service → HTTP и запускает сервер.
 [Runtime](backend/RUNTIME.md) и ADR-013 описывают startup/shutdown и defaults.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 func TestParseMD5(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 func TestThreatDataValidate(t *testing.T) {

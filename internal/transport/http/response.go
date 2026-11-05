@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 // writeJSON encodes before committing headers, so encoding failures can become 500.

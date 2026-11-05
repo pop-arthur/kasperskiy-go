@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 GO ?= go
-IMAGE ?= kasperski-go-test:local
+IMAGE ?= kaspersky-go-test:local
 
 .PHONY: help fmt vet test check build run docker-build docker-run
 help:

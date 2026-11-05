@@ -8,7 +8,7 @@ import (
 	"net"
 	"net/http"
 
-	"kasperski-go-test/internal/config"
+	"kaspersky-go-test/internal/config"
 )
 
 // serveHTTP owns the listener and request contexts, but not the database pool.

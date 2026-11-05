@@ -3,7 +3,7 @@ package usecase
 import (
 	"context"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 // ThreatService validates input and coordinates the three threat operations.

@@ -7,7 +7,7 @@ HTTP transport, конфигурация и корректное заверше�
 
 Go 1.27.3, стандартные net/http и slog, native pgx/v5 v5.12.0,
 PostgreSQL 18.6 и golang-migrate v4.20.1. Без ORM, HTTP framework и DI-контейнера.
-Module path kasperski-go-test локальный: реальный URL репозитория не предоставлен.
+Module path kaspersky-go-test локальный: реальный URL репозитория не предоставлен.
 
 ## Быстрый запуск через Docker Compose
 

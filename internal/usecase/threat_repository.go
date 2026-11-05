@@ -3,7 +3,7 @@ package usecase
 import (
 	"context"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 // ThreatRepository persists validated data. The caller must parse the MD5 and

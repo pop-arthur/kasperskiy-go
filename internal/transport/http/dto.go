@@ -3,7 +3,7 @@ package httptransport
 import (
 	"time"
 
-	"kasperski-go-test/internal/domain"
+	"kaspersky-go-test/internal/domain"
 )
 
 type createRequest struct {

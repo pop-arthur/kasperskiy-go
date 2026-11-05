@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"kasperski-go-test/internal/domain"
-	"kasperski-go-test/internal/usecase"
+	"kaspersky-go-test/internal/domain"
+	"kaspersky-go-test/internal/usecase"
 )
 
 const canonicalMD5 = "d41d8cd98f00b204e9800998ecf8427e"

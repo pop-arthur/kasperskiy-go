@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"kasperski-go-test/internal/domain"
-	"kasperski-go-test/internal/usecase"
+	"kaspersky-go-test/internal/domain"
+	"kaspersky-go-test/internal/usecase"
 )
 
 func TestThreatServiceWithPostgres(t *testing.T) {

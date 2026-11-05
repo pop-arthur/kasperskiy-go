@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	httptransport "kasperski-go-test/internal/transport/http"
-	"kasperski-go-test/internal/usecase"
+	httptransport "kaspersky-go-test/internal/transport/http"
+	"kaspersky-go-test/internal/usecase"
 )
 
 func TestHTTPWithPostgres(t *testing.T) {

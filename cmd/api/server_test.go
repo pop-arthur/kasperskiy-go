@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"kasperski-go-test/internal/config"
+	"kaspersky-go-test/internal/config"
 )
 
 type runningServer struct {
