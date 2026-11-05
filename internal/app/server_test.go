@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -105,7 +105,6 @@ func TestServerDrainsInFlightRequest(t *testing.T) {
 		t.Fatal("request not accepted")
 	}
 	running.cancel()
-	// Wait until Shutdown has closed the listener, without assuming scheduling delays.
 	deadline := time.After(time.Second)
 	for {
 		connection, err := net.DialTimeout("tcp", running.address, 50*time.Millisecond)

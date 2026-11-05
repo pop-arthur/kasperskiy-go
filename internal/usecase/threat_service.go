@@ -6,18 +6,17 @@ import (
 	"kaspersky-go-test/internal/domain"
 )
 
-// ThreatService validates input and coordinates the three threat operations.
-// It holds no request state and can be shared by concurrent callers when its
-// repository is safe for concurrent use.
+// ThreatService проверяет входные данные и вызывает хранилище; поздняя отмена контекста не меняет успешный результат.
 type ThreatService struct {
 	repository ThreatRepository
 }
 
-// NewThreatService requires a non-nil repository and performs no I/O.
+// NewThreatService создаёт сервис; repository должен быть ненулевым.
 func NewThreatService(repository ThreatRepository) *ThreatService {
 	return &ThreatService{repository: repository}
 }
 
+// GetByMD5 проверяет MD5, приводит его к нижнему регистру и запрашивает угрозу в хранилище.
 func (service *ThreatService) GetByMD5(ctx context.Context, md5 string) (domain.Threat, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Threat{}, err
@@ -33,6 +32,7 @@ func (service *ThreatService) GetByMD5(ctx context.Context, md5 string) (domain.
 	return threat, nil
 }
 
+// Create проверяет MD5 и поля угрозы перед записью; существующий хеш даёт ErrThreatAlreadyExists.
 func (service *ThreatService) Create(ctx context.Context, md5 string, data domain.ThreatData) (domain.Threat, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Threat{}, err
@@ -51,6 +51,7 @@ func (service *ThreatService) Create(ctx context.Context, md5 string, data domai
 	return threat, nil
 }
 
+// Update проверяет данные и заменяет поля существующей угрозы; nil в Description удаляет описание.
 func (service *ThreatService) Update(ctx context.Context, md5 string, data domain.ThreatData) (domain.Threat, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Threat{}, err

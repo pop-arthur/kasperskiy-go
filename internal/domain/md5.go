@@ -1,3 +1,4 @@
+// Package domain содержит модель угрозы, её проверки и ошибки.
 package domain
 
 import (
@@ -5,13 +6,13 @@ import (
 	"strings"
 )
 
+// ErrInvalidMD5 означает, что значение не содержит ровно 32 ASCII hex-символа.
 var ErrInvalidMD5 = errors.New("invalid MD5")
 
-// MD5 identifies a threat using a canonical lowercase hexadecimal hash.
-// Use ParseMD5 to validate external input before calling a repository.
+// MD5 хранит хеш в нижнем регистре; проверенное значение создаёт ParseMD5.
 type MD5 string
 
-// ParseMD5 accepts exactly 32 ASCII hexadecimal characters without trimming.
+// ParseMD5 принимает ровно 32 hex-символа без пробелов, приводит их к нижнему регистру или возвращает ErrInvalidMD5.
 func ParseMD5(value string) (MD5, error) {
 	if len(value) != 32 {
 		return "", ErrInvalidMD5

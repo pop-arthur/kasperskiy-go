@@ -46,6 +46,16 @@ func noService(t *testing.T) serviceFake {
 	}}
 }
 
+func requireAbort(t *testing.T, call func()) {
+	t.Helper()
+	defer func() {
+		if value := recover(); value != http.ErrAbortHandler {
+			t.Fatalf("expected ErrAbortHandler, got %v", value)
+		}
+	}()
+	call()
+}
+
 func storedThreat(description *string) domain.Threat {
 	return domain.Threat{
 		MD5: hash, Name: "", Description: description,
@@ -57,6 +67,7 @@ func storedThreat(description *string) domain.Threat {
 func request(method, path, body string) *http.Request {
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer "+testAPIKey)
 	return r
 }
 
@@ -114,7 +125,7 @@ func TestHandlersDelegateAndSerialize(t *testing.T) {
 					return result, nil
 				}}
 				recorder := httptest.NewRecorder()
-				NewHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, r)
+				testHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, r)
 				object := jsonObject(t, recorder, status)
 				if calls != 1 || string(object["name"]) != `""` || string(object["md5"]) != `"`+hash+`"` {
 					t.Fatalf("unexpected response/calls: %s, %d", recorder.Body, calls)
@@ -172,7 +183,7 @@ func TestInvalidRequestsDoNotReachService(t *testing.T) {
 					path += "/" + hash
 				}
 				recorder := httptest.NewRecorder()
-				NewHandler(noService(t), logger(io.Discard), 4096).ServeHTTP(recorder, request(method, path, test.body))
+				testHandler(noService(t), logger(io.Discard), 4096).ServeHTTP(recorder, request(method, path, test.body))
 				requireErrorResponse(t, recorder, 400)
 			})
 		}
@@ -201,7 +212,7 @@ func TestDecoderPreservesOptionalAndDuplicateFields(t *testing.T) {
 			}}
 			r := request("PUT", "/info/"+hash, test.body)
 			recorder := httptest.NewRecorder()
-			NewHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, r)
+			testHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, r)
 			jsonObject(t, recorder, 200)
 			if calls != 1 {
 				t.Fatal("expected one service call")
@@ -245,7 +256,7 @@ func TestMediaTypesAndBodyLimits(t *testing.T) {
 				r.TransferEncoding = []string{"chunked"}
 			}
 			recorder := httptest.NewRecorder()
-			NewHandler(service, logger(io.Discard), test.limit).ServeHTTP(recorder, r)
+			testHandler(service, logger(io.Discard), test.limit).ServeHTTP(recorder, r)
 			if test.status == 400 {
 				requireErrorResponse(t, recorder, 400)
 			} else {
@@ -278,7 +289,7 @@ func TestServiceErrorMapping(t *testing.T) {
 				path = "/info"
 			}
 			recorder := httptest.NewRecorder()
-			NewHandler(service, logger(&logs), 4096).ServeHTTP(recorder, request(test.method, path, `{"md5":"`+hash+`","name":""}`))
+			testHandler(service, logger(&logs), 4096).ServeHTTP(recorder, request(test.method, path, `{"md5":"`+hash+`","name":""}`))
 			requireErrorResponse(t, recorder, test.status)
 			if strings.Contains(recorder.Body.String(), "internal diagnostics") || strings.Contains(recorder.Body.String(), "database unavailable") {
 				t.Fatal("internal error exposed")
@@ -295,7 +306,7 @@ func TestServiceErrorMapping(t *testing.T) {
 }
 
 func TestRoutingAndHEAD(t *testing.T) {
-	handler := NewHandler(noService(t), logger(io.Discard), 4096)
+	handler := testHandler(noService(t), logger(io.Discard), 4096)
 	for _, test := range []struct {
 		method, path string
 		status       int
@@ -315,7 +326,7 @@ func TestRoutingAndHEAD(t *testing.T) {
 	}
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	response, err := server.Client().Head(server.URL + "/info/" + hash)
+	response, err := authorizedClient(server).Head(server.URL + "/info/" + hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,11 +349,17 @@ func TestRequestContextAndLateCancellation(t *testing.T) {
 			}
 			defer cancel()
 			recorder := httptest.NewRecorder()
-			NewHandler(noService(t), logger(io.Discard), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, "").WithContext(ctx))
+			serve := func() {
+				testHandler(noService(t), logger(io.Discard), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, "").WithContext(ctx))
+			}
 			if expired {
+				serve()
 				requireErrorResponse(t, recorder, 500)
-			} else if recorder.Body.Len() != 0 || len(recorder.Header()) != 0 {
-				t.Fatal("attempted response to canceled request")
+			} else {
+				requireAbort(t, serve)
+				if recorder.Body.Len() != 0 || len(recorder.Header()) != 0 {
+					t.Fatal("attempted response to canceled request")
+				}
 			}
 		})
 	}
@@ -353,15 +370,14 @@ func TestRequestContextAndLateCancellation(t *testing.T) {
 		return storedThreat(nil), nil
 	}}
 	recorder := httptest.NewRecorder()
-	NewHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, "").WithContext(ctx))
+	testHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, "").WithContext(ctx))
 	jsonObject(t, recorder, 200)
 }
 
-// Verify route matching delegates invalid MD5 to the real service, not a 404 fallback.
 func TestInvalidHashThroughRealService(t *testing.T) {
 	service := usecase.NewThreatService(unusedRepository{t: t})
 	recorder := httptest.NewRecorder()
-	NewHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, request("GET", "/info/bad", ""))
+	testHandler(service, logger(io.Discard), 4096).ServeHTTP(recorder, request("GET", "/info/bad", ""))
 	requireErrorResponse(t, recorder, 400)
 }
 
@@ -371,7 +387,7 @@ func TestPanicIsRecoveredWithoutLeakingPayload(t *testing.T) {
 		panic("sensitive-body")
 	}}
 	recorder := httptest.NewRecorder()
-	NewHandler(service, logger(&logs), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, ""))
+	testHandler(service, logger(&logs), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, ""))
 	requireErrorResponse(t, recorder, 500)
 	if strings.Contains(recorder.Body.String(), "sensitive-body") || strings.Contains(logs.String(), "sensitive-body") {
 		t.Fatal("panic payload exposed")
@@ -387,7 +403,7 @@ func TestHandlerConcurrentRequests(t *testing.T) {
 		calls.Add(1)
 		return storedThreat(nil), nil
 	}}
-	handler := NewHandler(service, logger(io.Discard), 4096)
+	handler := testHandler(service, logger(io.Discard), 4096)
 	done := make(chan int, 8)
 	for range 8 {
 		go func() {
@@ -408,7 +424,6 @@ func TestHandlerConcurrentRequests(t *testing.T) {
 
 func pointer(value string) *string { return &value }
 
-// The real service must reject invalid input without contacting this repository.
 type unusedRepository struct{ t *testing.T }
 
 func (repo unusedRepository) unexpected() (domain.Threat, error) {
@@ -423,4 +438,26 @@ func (repo unusedRepository) Create(context.Context, domain.MD5, domain.ThreatDa
 }
 func (repo unusedRepository) Update(context.Context, domain.MD5, domain.ThreatData) (domain.Threat, error) {
 	return repo.unexpected()
+}
+
+const testAPIKey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func testSecurity() SecurityOptions {
+	return SecurityOptions{APIKey: testAPIKey, RateLimitRPS: 10000, RateLimitBurst: 10000, RateLimitMaxClients: 100, ReadinessTimeout: time.Second, Ping: func(context.Context) error { return nil }}
+}
+
+func testHandler(service ThreatService, log *slog.Logger, limit int64) http.Handler {
+	return NewHandler(service, log, limit, testSecurity())
+}
+
+type authenticatedTransport struct{ base http.RoundTripper }
+
+func (a authenticatedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	copy := r.Clone(r.Context())
+	copy.Header.Set("Authorization", "Bearer "+testAPIKey)
+	return a.base.RoundTrip(copy)
+}
+func authorizedClient(server *httptest.Server) *http.Client {
+	original := server.Client()
+	return &http.Client{Transport: authenticatedTransport{base: original.Transport}, Timeout: original.Timeout}
 }

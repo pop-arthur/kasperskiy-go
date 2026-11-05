@@ -2,24 +2,32 @@ openapi: 3.0.0
 info:
   title: Information Exchange Service
   description: |-
-    API для обмена информацией об угрозах. MD5 принимается в любом регистре,
+    API для обмена информацией об угрозах. Для всех бизнес-маршрутов требуется
+    Authorization: Bearer <API_KEY>. До авторизации действует token bucket по IP
+    непосредственного соединения: по умолчанию 10 запросов/с, burst 20.
+    Forwarded и X-Forwarded-For не учитываются. Лимиты локальны для процесса.
+    Без ключа возвращается 401, при превышении лимита — 429 с Retry-After.
+    Локальный /readyz является отдельным исключением.
+    MD5 принимается в любом регистре,
     нормализуется к нижнему регистру и возвращается в канонической форме.
     Известные строковые поля не принимают null и U+0000. Пустые строки и пробелы
     в name/description допустимы и сохраняются без обрезки; лимит длины не задан.
     Неизвестные поля JSON-запросов игнорируются и не сохраняются, включая
     created_at/updated_at: даты назначает только сервер. Тело POST/PUT должно
-    содержать один JSON-объект. Пути и HTTP-коды исходного API сохранены.
+    содержать один JSON-объект.
     POST/PUT принимают Content-Type application/json с необязательным charset=utf-8.
     Иной/отсутствующий media type, неподдержанный charset/Content-Encoding,
     превышение настроенного лимита тела и ошибки формы JSON дают 400.
-    Лимит задаётся HTTP-конфигурацией; проектное значение по умолчанию — 1 MiB.
+    Лимит задаётся HTTP-конфигурацией; значение по умолчанию — 1 MiB.
     Имена известных JSON-полей учитывают регистр; при повторении ключа используется
     последнее значение. description=null запрещён, отсутствие description допустимо.
-    Неизвестные пути дают JSON 404, неподдержанные методы — JSON 405 с Allow.
+    После успешной авторизации неизвестные пути дают JSON 404, неподдержанные методы — JSON 405 с Allow.
     HEAD не вызывает GET и возвращает 405 без тела. Стандартные redirect ServeMux
     при очистке неканонических URL сохраняются. Ошибки HTTP-парсинга до handler
     и отключённое соединение не имеют гарантированного JSON-ответа.
-  version: 1.1.0
+  version: 1.2.0
+security:
+  - BearerAuth: []
 paths:
   /info/{md5}:
     get:
@@ -38,6 +46,29 @@ paths:
             minLength: 32
             maxLength: 32
       responses:
+        '401':
+          description: Отсутствующий или неверный Bearer-токен
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+              description: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Превышен лимит запросов по IP или заполнена таблица клиентов
+          headers:
+            Retry-After:
+              description: Время ожидания в целых секундах
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '200':
           description: Успешный ответ с информацией об угрозе
           content:
@@ -91,6 +122,29 @@ paths:
             schema:
               $ref: '#/components/schemas/ThreatUpdateRequest'
       responses:
+        '401':
+          description: Отсутствующий или неверный Bearer-токен
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+              description: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Превышен лимит запросов по IP или заполнена таблица клиентов
+          headers:
+            Retry-After:
+              description: Время ожидания в целых секундах
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '200':
           description: Информация успешно обновлена
           content:
@@ -132,6 +186,29 @@ paths:
             schema:
               $ref: '#/components/schemas/ThreatCreateRequest'
       responses:
+        '401':
+          description: Отсутствующий или неверный Bearer-токен
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+              description: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Превышен лимит запросов по IP или заполнена таблица клиентов
+          headers:
+            Retry-After:
+              description: Время ожидания в целых секундах
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '201':
           description: Запись успешно создана
           content:
@@ -157,8 +234,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /readyz:
+    get:
+      summary: Локальная проверка готовности HTTP и PostgreSQL
+      operationId: getReadiness
+      description: |-
+        Доступен только для непосредственного loopback-клиента без Bearer-токена
+        и rate limit. Proxy-заголовки игнорируются; внешнему клиенту возвращается 404.
+        Проверка PostgreSQL ограничена меньшим из POSTGRES_OPERATION_TIMEOUT и 1s.
+      security: []
+      responses:
+        '200':
+          description: Сервис готов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '404':
+          description: Маршрут недоступен внешнему клиенту
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: PostgreSQL недоступен или истёк бюджет проверки
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Один API-ключ из переменной API_KEY; одинаковые права на GET, POST и PUT.
   schemas:
+    ReadinessResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready]
     ThreatCreateRequest:
       type: object
       required:

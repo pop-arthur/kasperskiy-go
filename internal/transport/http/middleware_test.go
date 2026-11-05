@@ -22,7 +22,7 @@ func TestEncodingFailureIsJSON500(t *testing.T) {
 		return threat, nil
 	}}
 	recorder := httptest.NewRecorder()
-	NewHandler(service, logger(&logs), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, ""))
+	testHandler(service, logger(&logs), 4096).ServeHTTP(recorder, request("GET", "/info/"+hash, ""))
 	requireErrorResponse(t, recorder, 500)
 	if strings.Count(logs.String(), `"level":"ERROR"`) != 1 {
 		t.Fatalf("error not logged once: %s", &logs)
@@ -51,7 +51,7 @@ func TestWriteFailureDoesNotSendSecondResponse(t *testing.T) {
 			return storedThreat(nil), nil
 		}}
 		writer := &failingWriter{header: make(http.Header), short: short}
-		NewHandler(service, logger(&logs), 4096).ServeHTTP(writer, request("GET", "/info/"+hash, ""))
+		testHandler(service, logger(&logs), 4096).ServeHTTP(writer, request("GET", "/info/"+hash, ""))
 		if len(writer.statuses) != 1 || writer.statuses[0] != 200 {
 			t.Fatalf("second status after write failure: %v", writer.statuses)
 		}
@@ -71,7 +71,7 @@ func TestPanicAfterPartialResponseAbortsStream(t *testing.T) {
 	})
 	server := httptest.NewServer(requestLogging(logger(io.Discard), recoverPanics(partial)))
 	defer server.Close()
-	response, err := server.Client().Get(server.URL)
+	response, err := authorizedClient(server).Get(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,12 @@ func TestReadFailureAndCanceledRead(t *testing.T) {
 		}
 		r.Body = body
 		recorder := httptest.NewRecorder()
-		NewHandler(noService(t), logger(io.Discard), 4096).ServeHTTP(recorder, r)
+		serve := func() { testHandler(noService(t), logger(io.Discard), 4096).ServeHTTP(recorder, r) }
+		if canceled {
+			requireAbort(t, serve)
+		} else {
+			serve()
+		}
 		cancel()
 		if !body.closed {
 			t.Fatal("request body not closed")
@@ -144,17 +149,17 @@ func TestAccessLogDoesNotIncludeRequestData(t *testing.T) {
 		return storedThreat(nil), nil
 	}}
 	r := request("POST", "/info", `{"md5":"`+hash+`","name":"secret-body"}`)
-	NewHandler(service, logger(&logs), 4096).ServeHTTP(httptest.NewRecorder(), r)
+	testHandler(service, logger(&logs), 4096).ServeHTTP(httptest.NewRecorder(), r)
 	if strings.Contains(logs.String(), hash) || strings.Contains(logs.String(), "secret-body") {
 		t.Fatalf("request data logged: %s", &logs)
 	}
-	if !strings.Contains(logs.String(), `"route":"/info"`) || !strings.Contains(logs.String(), `"status":201`) {
+	if !strings.Contains(logs.String(), `"route":"POST /info"`) || !strings.Contains(logs.String(), `"status":201`) {
 		t.Fatalf("missing request summary: %s", &logs)
 	}
 }
 
 func TestOversizedChunkedBodyThroughServer(t *testing.T) {
-	server := httptest.NewServer(NewHandler(noService(t), logger(io.Discard), 32))
+	server := httptest.NewServer(testHandler(noService(t), logger(io.Discard), 32))
 	defer server.Close()
 	body := `{"md5":"` + hash + `","name":"oversized"}`
 	r, err := http.NewRequest("POST", server.URL+"/info", io.NopCloser(strings.NewReader(body)))
@@ -164,7 +169,7 @@ func TestOversizedChunkedBodyThroughServer(t *testing.T) {
 	r.ContentLength = -1
 	r.TransferEncoding = []string{"chunked"}
 	r.Header.Set("Content-Type", "application/json")
-	response, err := server.Client().Do(r)
+	response, err := authorizedClient(server).Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}

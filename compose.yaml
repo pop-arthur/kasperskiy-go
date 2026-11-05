@@ -5,7 +5,17 @@ services:
       postgres:
         condition: service_healthy
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "/api", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: ${POSTGRES_CONNECT_TIMEOUT-5s}
     environment:
+      API_KEY: ${API_KEY:?Set API_KEY in .env or the environment}
+      HTTP_RATE_LIMIT_RPS: ${HTTP_RATE_LIMIT_RPS-10}
+      HTTP_RATE_LIMIT_BURST: ${HTTP_RATE_LIMIT_BURST-20}
+      HTTP_RATE_LIMIT_MAX_CLIENTS: ${HTTP_RATE_LIMIT_MAX_CLIENTS-10000}
       LOG_LEVEL: ${LOG_LEVEL-INFO}
       HTTP_ADDR: 0.0.0.0:8080
       HTTP_READ_HEADER_TIMEOUT: ${HTTP_READ_HEADER_TIMEOUT-5s}
@@ -22,6 +32,7 @@ services:
       POSTGRES_SSLMODE: ${POSTGRES_SSLMODE-disable}
       POSTGRES_MAX_CONNS: ${POSTGRES_MAX_CONNS-10}
       POSTGRES_CONNECT_TIMEOUT: ${POSTGRES_CONNECT_TIMEOUT-5s}
+      POSTGRES_OPERATION_TIMEOUT: ${POSTGRES_OPERATION_TIMEOUT-5s}
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
 

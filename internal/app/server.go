@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"kaspersky-go-test/internal/config"
 )
 
-// serveHTTP owns the listener and request contexts, but not the database pool.
+// serveHTTP даёт запросам завершиться после отмены ctx, а по ShutdownTimeout отменяет их и закрывает соединения.
 func serveHTTP(ctx context.Context, listener net.Listener, handler http.Handler, cfg config.HTTPConfig, logger *slog.Logger) error {
 	defer listener.Close()
 	requestCtx, cancelRequests := context.WithCancel(context.Background())

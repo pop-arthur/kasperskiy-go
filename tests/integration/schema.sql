@@ -1,4 +1,3 @@
--- Runs only against the disposable database created by check_database.py.
 BEGIN;
 
 DO $$
@@ -13,7 +12,6 @@ BEGIN
         RAISE EXCEPTION 'Invalid NULL or timestamp defaults';
     END IF;
 
-    -- Name need not be unique. Empty and absent descriptions differ.
     INSERT INTO public.threats (md5, name, description)
     VALUES ('00000000000000000000000000000000', '', '');
     IF NOT EXISTS (SELECT 1 FROM public.threats
@@ -61,5 +59,4 @@ BEGIN
     END LOOP;
 END $$;
 
--- These rows are only for constraint verification.
 ROLLBACK;

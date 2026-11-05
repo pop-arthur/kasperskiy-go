@@ -8,29 +8,37 @@ import (
 )
 
 var (
-	ErrThreatNotFound      = errors.New("threat not found")
+	// ErrThreatNotFound означает отсутствие записи с запрошенным MD5.
+	ErrThreatNotFound = errors.New("threat not found")
+	// ErrThreatAlreadyExists означает конфликт при создании записи с существующим MD5.
 	ErrThreatAlreadyExists = errors.New("threat already exists")
-	ErrInvalidThreatData   = errors.New("invalid threat data")
+	// ErrInvalidThreatData означает нарушение ограничений изменяемых полей угрозы.
+	ErrInvalidThreatData = errors.New("invalid threat data")
 )
 
-// Threat is a persisted threat. Timestamps are assigned by the database.
+// Threat представляет сохранённую угрозу с метками времени, назначенными хранилищем.
 type Threat struct {
-	MD5         MD5
-	Name        string
+	// MD5 — канонический идентификатор угрозы.
+	MD5 MD5
+	// Name — имя угрозы; пустая строка допустима.
+	Name string
+	// Description содержит описание; nil означает отсутствие, указатель на "" — пустое описание.
 	Description *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// CreatedAt — время создания, назначаемое хранилищем и сохраняемое при обновлении.
+	CreatedAt time.Time
+	// UpdatedAt — время последнего обновления; не является версией записи.
+	UpdatedAt time.Time
 }
 
-// ThreatData contains the fields replaced by an update.
-// A nil Description means no description; a pointer to "" means empty text.
+// ThreatData содержит изменяемые поля для создания или полной замены данных угрозы.
 type ThreatData struct {
-	Name        string
+	// Name заменяет имя целиком; пробелы и пустая строка сохраняются.
+	Name string
+	// Description заменяет описание целиком; nil удаляет прежнее значение при Update.
 	Description *string
 }
 
-// Validate checks storage-compatible text without trimming or rejecting empty names.
-// JSON field presence and explicit null are checked by the HTTP transport.
+// Validate запрещает U+0000 и возвращает ErrInvalidThreatData; пустые строки и пробелы допустимы.
 func (data ThreatData) Validate() error {
 	if strings.ContainsRune(data.Name, '\x00') {
 		return fmt.Errorf("%w: name contains U+0000", ErrInvalidThreatData)

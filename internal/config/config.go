@@ -1,4 +1,4 @@
-// Package config reads and validates process configuration without loading .env files.
+// Package config читает и проверяет настройки окружения через cleanenv.
 package config
 
 import (
@@ -7,39 +7,73 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"reflect"
+
+	"github.com/ilyakaznacheev/cleanenv"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// Config содержит настройки процесса и секреты, поэтому целиком логировать её нельзя.
 type Config struct {
-	LogLevel slog.Level
-	HTTP     HTTPConfig
+	// APIKey — обязательный секрет для Bearer-аутентификации всех бизнес-маршрутов.
+	APIKey string `env:"API_KEY" env-required:"true"`
+	// LogLevel задаёт порог структурированного логирования в синтаксисе slog.
+	LogLevel slog.Level `env:"LOG_LEVEL" env-default:"INFO"`
+	// HTTP содержит настройки listener и HTTP-адаптера.
+	HTTP HTTPConfig
+	// Postgres содержит реквизиты и ограничения работы с БД.
 	Postgres PostgresConfig
 }
 
+// HTTPConfig задаёт адрес сервера, таймауты и лимиты HTTP-запросов.
 type HTTPConfig struct {
-	Addr              string
-	ReadHeaderTimeout time.Duration
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	ShutdownTimeout   time.Duration
-	MaxBodyBytes      int64
+	// Addr — TCP-адрес host:port; порт 0 выбирает свободный порт при запуске.
+	Addr string `env:"HTTP_ADDR" env-default:"127.0.0.1:8080"`
+	// ReadHeaderTimeout ограничивает чтение HTTP-заголовков.
+	ReadHeaderTimeout time.Duration `env:"HTTP_READ_HEADER_TIMEOUT" env-default:"5s"`
+	// ReadTimeout ограничивает чтение запроса, включая тело.
+	ReadTimeout time.Duration `env:"HTTP_READ_TIMEOUT" env-default:"10s"`
+	// WriteTimeout ограничивает запись HTTP-ответа независимо от deadline операции БД.
+	WriteTimeout time.Duration `env:"HTTP_WRITE_TIMEOUT" env-default:"15s"`
+	// IdleTimeout ограничивает ожидание следующего запроса на keep-alive соединении.
+	IdleTimeout time.Duration `env:"HTTP_IDLE_TIMEOUT" env-default:"60s"`
+	// ShutdownTimeout задаёт время на завершение текущих запросов перед принудительным закрытием.
+	ShutdownTimeout time.Duration `env:"HTTP_SHUTDOWN_TIMEOUT" env-default:"10s"`
+	// MaxBodyBytes — максимальный размер тела POST/PUT в байтах.
+	MaxBodyBytes int64 `env:"HTTP_MAX_BODY_BYTES" env-default:"1048576"`
+	// RateLimitRPS задаёт скорость восстановления токенов в секунду для каждого IP.
+	RateLimitRPS int `env:"HTTP_RATE_LIMIT_RPS" env-default:"10"`
+	// RateLimitBurst задаёт ёмкость token bucket, доступную новому IP целиком.
+	RateLimitBurst int `env:"HTTP_RATE_LIMIT_BURST" env-default:"20"`
+	// RateLimitMaxClients ограничивает число одновременно хранимых IP в limiter.
+	RateLimitMaxClients int `env:"HTTP_RATE_LIMIT_MAX_CLIENTS" env-default:"10000"`
 }
 
+// PostgresConfig содержит реквизиты БД, размер пула и таймауты операций.
 type PostgresConfig struct {
-	Host           string
-	Port           uint16
-	Database       string
-	User           string
-	Password       string
-	SSLMode        string
-	MaxConns       int32
-	ConnectTimeout time.Duration
+	// Host — TCP-хост PostgreSQL; IPv6 задаётся без квадратных скобок.
+	Host string `env:"POSTGRES_HOST" env-default:"127.0.0.1"`
+	// Port — TCP-порт PostgreSQL в диапазоне 1–65535.
+	Port uint16 `env:"POSTGRES_PORT" env-default:"5432"`
+	// Database — имя базы данных.
+	Database string `env:"POSTGRES_DB" env-default:"threats"`
+	// User — роль подключения PostgreSQL.
+	User string `env:"POSTGRES_USER" env-default:"threats"`
+	// Password — обязательный пароль; пробелы не обрезаются.
+	Password string `env:"POSTGRES_PASSWORD" env-required:"true"`
+	// SSLMode задаёт режим TLS, принимаемый pgx.
+	SSLMode string `env:"POSTGRES_SSLMODE" env-default:"disable"`
+	// MaxConns ограничивает число соединений в общем пуле.
+	MaxConns int32 `env:"POSTGRES_MAX_CONNS" env-default:"10"`
+	// ConnectTimeout ограничивает подключение и общий startup-контекст приложения.
+	ConnectTimeout time.Duration `env:"POSTGRES_CONNECT_TIMEOUT" env-default:"5s"`
+	// OperationTimeout — единый бюджет ожидания пула, выполнения SQL и чтения результата операции.
+	OperationTimeout time.Duration `env:"POSTGRES_OPERATION_TIMEOUT" env-default:"5s"`
 }
 
-// URL constructs a connection string with escaped credentials. Never log it.
+// URL возвращает DSN с экранированными реквизитами; строка содержит пароль и не подходит для логов.
 func (cfg PostgresConfig) URL() string {
 	connection := url.URL{
 		Scheme: "postgres", User: url.UserPassword(cfg.User, cfg.Password),
@@ -51,51 +85,118 @@ func (cfg PostgresConfig) URL() string {
 	return connection.String()
 }
 
-func Load() (Config, error) { return load(os.LookupEnv) }
-
-func load(lookup func(string) (string, bool)) (Config, error) {
-	reader := envReader{lookup: lookup}
-	cfg := Config{}
-	if err := cfg.LogLevel.UnmarshalText([]byte(reader.text("LOG_LEVEL", "INFO"))); err != nil {
-		reader.invalid("LOG_LEVEL")
+// Load читает окружение без загрузки .env; пустые значения отклоняются, при ошибке возвращается нулевая Config без секретов в диагностике.
+func Load() (Config, error) {
+	fields := environmentFields(reflect.TypeFor[Config]())
+	for _, field := range fields {
+		value, exists := os.LookupEnv(field.name)
+		if (!exists && field.required) || (exists && (value == "" || strings.ContainsRune(value, '\x00'))) {
+			return Config{}, invalid(field.name)
+		}
 	}
-	cfg.HTTP = HTTPConfig{
-		Addr:              reader.text("HTTP_ADDR", "127.0.0.1:8080"),
-		ReadHeaderTimeout: reader.duration("HTTP_READ_HEADER_TIMEOUT", "5s"),
-		ReadTimeout:       reader.duration("HTTP_READ_TIMEOUT", "10s"),
-		WriteTimeout:      reader.duration("HTTP_WRITE_TIMEOUT", "15s"),
-		IdleTimeout:       reader.duration("HTTP_IDLE_TIMEOUT", "60s"),
-		ShutdownTimeout:   reader.duration("HTTP_SHUTDOWN_TIMEOUT", "10s"),
-		MaxBodyBytes:      reader.integer("HTTP_MAX_BODY_BYTES", "1048576", 1, 1<<63-1),
+	var cfg Config
+	if err := cleanenv.ReadEnv(&cfg); err != nil {
+		// Ошибка cleanenv может содержать исходное значение. Извлекаем только известное
+		// имя переменной из служебного префикса, не возвращая и не оборачивая причину.
+		if strings.HasPrefix(err.Error(), "parsing field ") {
+			_, suffix, ok := strings.Cut(err.Error(), ` env `)
+			if ok {
+				name, _, found := strings.Cut(suffix, `: `)
+				if found {
+					for _, field := range fields {
+						if field.name == name {
+							return Config{}, invalid(name)
+						}
+					}
+				}
+			}
+		}
+		return Config{}, fmt.Errorf("invalid configuration")
+	}
+	if err := cfg.validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+type environmentField struct {
+	name     string
+	required bool
+}
+
+func environmentFields(typ reflect.Type) []environmentField {
+	var fields []environmentField
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if name := field.Tag.Get("env"); name != "" {
+			_, required := field.Tag.Lookup("env-required")
+			fields = append(fields, environmentField{name, required})
+		} else if field.Type.Kind() == reflect.Struct {
+			fields = append(fields, environmentFields(field.Type)...)
+		}
+	}
+	return fields
+}
+
+func invalid(name string) error { return fmt.Errorf("invalid configuration: %s", name) }
+
+func (cfg Config) validate() error {
+	if !validAPIKey(cfg.APIKey) {
+		return invalid("API_KEY")
 	}
 	host, port, err := net.SplitHostPort(cfg.HTTP.Addr)
 	if err != nil || !validHost(host, true) {
-		reader.invalid("HTTP_ADDR")
-	} else if value, err := strconv.ParseUint(port, 10, 16); err != nil || value > 65535 {
-		reader.invalid("HTTP_ADDR")
+		return invalid("HTTP_ADDR")
 	}
-	cfg.Postgres = PostgresConfig{
-		Host:           reader.text("POSTGRES_HOST", "127.0.0.1"),
-		Port:           uint16(reader.integer("POSTGRES_PORT", "5432", 1, 65535)),
-		Database:       reader.text("POSTGRES_DB", "threats"),
-		User:           reader.text("POSTGRES_USER", "threats"),
-		Password:       reader.text("POSTGRES_PASSWORD", ""),
-		SSLMode:        reader.text("POSTGRES_SSLMODE", "disable"),
-		MaxConns:       int32(reader.integer("POSTGRES_MAX_CONNS", "10", 1, 1<<31-1)),
-		ConnectTimeout: reader.duration("POSTGRES_CONNECT_TIMEOUT", "5s"),
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return invalid("HTTP_ADDR")
 	}
 	if !validHost(cfg.Postgres.Host, false) {
-		reader.invalid("POSTGRES_HOST")
+		return invalid("POSTGRES_HOST")
+	}
+	if cfg.Postgres.Port == 0 {
+		return invalid("POSTGRES_PORT")
+	}
+	if cfg.Postgres.MaxConns <= 0 {
+		return invalid("POSTGRES_MAX_CONNS")
+	}
+	if cfg.HTTP.MaxBodyBytes <= 0 {
+		return invalid("HTTP_MAX_BODY_BYTES")
+	}
+	for _, setting := range []struct {
+		name  string
+		value int
+	}{
+		{"HTTP_RATE_LIMIT_RPS", cfg.HTTP.RateLimitRPS},
+		{"HTTP_RATE_LIMIT_BURST", cfg.HTTP.RateLimitBurst},
+		{"HTTP_RATE_LIMIT_MAX_CLIENTS", cfg.HTTP.RateLimitMaxClients},
+	} {
+		if setting.value <= 0 || int64(setting.value) > 1<<31-1 {
+			return invalid(setting.name)
+		}
+	}
+	for _, setting := range []struct {
+		name  string
+		value time.Duration
+	}{
+		{"HTTP_READ_HEADER_TIMEOUT", cfg.HTTP.ReadHeaderTimeout},
+		{"HTTP_READ_TIMEOUT", cfg.HTTP.ReadTimeout},
+		{"HTTP_WRITE_TIMEOUT", cfg.HTTP.WriteTimeout},
+		{"HTTP_IDLE_TIMEOUT", cfg.HTTP.IdleTimeout},
+		{"HTTP_SHUTDOWN_TIMEOUT", cfg.HTTP.ShutdownTimeout},
+		{"POSTGRES_CONNECT_TIMEOUT", cfg.Postgres.ConnectTimeout},
+		{"POSTGRES_OPERATION_TIMEOUT", cfg.Postgres.OperationTimeout},
+	} {
+		if setting.value <= 0 {
+			return invalid(setting.name)
+		}
 	}
 	switch cfg.Postgres.SSLMode {
 	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
 	default:
-		reader.invalid("POSTGRES_SSLMODE")
+		return invalid("POSTGRES_SSLMODE")
 	}
-	if reader.err != nil {
-		return Config{}, reader.err
-	}
-	return cfg, nil
+	return nil
 }
 
 func validHost(host string, allowEmpty bool) bool {
@@ -108,40 +209,14 @@ func validHost(host string, allowEmpty bool) bool {
 	return !strings.Contains(host, ":") || net.ParseIP(host) != nil
 }
 
-type envReader struct {
-	lookup func(string) (string, bool)
-	err    error
-}
-
-func (reader *envReader) invalid(name string) {
-	if reader.err == nil {
-		reader.err = fmt.Errorf("invalid configuration: %s", name)
+func validAPIKey(key string) bool {
+	if len(key) < 32 || len(key) > 256 {
+		return false
 	}
-}
-
-func (reader *envReader) text(name, fallback string) string {
-	value, exists := reader.lookup(name)
-	if !exists {
-		value = fallback
+	for _, c := range key {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
 	}
-	if value == "" || strings.ContainsRune(value, '\x00') {
-		reader.invalid(name)
-	}
-	return value
-}
-
-func (reader *envReader) duration(name, fallback string) time.Duration {
-	value, err := time.ParseDuration(reader.text(name, fallback))
-	if err != nil || value <= 0 {
-		reader.invalid(name)
-	}
-	return value
-}
-
-func (reader *envReader) integer(name, fallback string, min, max int64) int64 {
-	value, err := strconv.ParseInt(reader.text(name, fallback), 10, 64)
-	if err != nil || value < min || value > max {
-		reader.invalid(name)
-	}
-	return value
+	return true
 }

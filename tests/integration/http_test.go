@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -19,7 +20,7 @@ import (
 func TestHTTPWithPostgres(t *testing.T) {
 	ctx, pool, repository := newRepository(t)
 	service := usecase.NewThreatService(repository)
-	server := httptest.NewServer(httptransport.NewHandler(service, slog.New(slog.NewJSONHandler(io.Discard, nil)), 4096))
+	server := httptest.NewServer(httptransport.NewHandler(service, slog.New(slog.NewJSONHandler(io.Discard, nil)), 4096, integrationSecurity(pool.Ping)))
 	defer server.Close()
 	do := func(method, path, body string, status int) map[string]json.RawMessage {
 		t.Helper()
@@ -30,6 +31,7 @@ func TestHTTPWithPostgres(t *testing.T) {
 		if method == "POST" || method == "PUT" {
 			r.Header.Set("Content-Type", "application/json; charset=utf-8")
 		}
+		r.Header.Set("Authorization", "Bearer "+integrationAPIKey)
 		response, err := server.Client().Do(r)
 		if err != nil {
 			t.Fatal(err)
@@ -110,5 +112,79 @@ func TestHTTPWithPostgres(t *testing.T) {
 	failure := do("GET", "/info/"+md5, "", 500)
 	if string(failure["message"]) != `"Internal server error"` || string(failure["details"]) != `""` {
 		t.Fatalf("internal details exposed: %v", failure)
+	}
+}
+
+const integrationAPIKey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func integrationSecurity(ping func(context.Context) error) httptransport.SecurityOptions {
+	return httptransport.SecurityOptions{APIKey: integrationAPIKey, RateLimitRPS: 10000, RateLimitBurst: 10000, RateLimitMaxClients: 100, ReadinessTimeout: time.Second, Ping: ping}
+}
+
+func TestHTTPSecurityWithPostgres(t *testing.T) {
+	_, pool, repository := newRepository(t)
+	options := integrationSecurity(pool.Ping)
+	options.RateLimitRPS = 1
+	options.RateLimitBurst = 2
+	server := httptest.NewServer(httptransport.NewHandler(usecase.NewThreatService(repository), slog.New(slog.NewJSONHandler(io.Discard, nil)), 4096, options))
+	defer server.Close()
+	md5 := string(key(t))
+	send := func(method, path, body, token string) (int, http.Header, map[string]any) {
+		t.Helper()
+		r, err := http.NewRequest(method, server.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		r.Header.Set("Content-Type", "application/json")
+		response, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var result map[string]any
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, response.Header, result
+	}
+	if status, headers, body := send("GET", "/missing", "", ""); status != 401 || headers.Get("WWW-Authenticate") != "Bearer" || body["message"] != "Unauthorized" || body["details"] != "" {
+		t.Fatal("missing authorization not rejected")
+	}
+	if status, _, _ := send("POST", "/info", `{"md5":"`+md5+`","name":"secured"}`, integrationAPIKey); status != 201 {
+		t.Fatalf("create: %d", status)
+	}
+	if status, headers, body := send("GET", "/info/"+md5, "", integrationAPIKey); status != 429 || headers.Get("Retry-After") != "1" || body["message"] != "Too many requests" || body["details"] != "" {
+		t.Fatal("rate limit contract violated")
+	}
+	if status, _, body := send("GET", "/readyz", "", ""); status != 200 || body["status"] != "ready" {
+		t.Fatal("readiness affected by limiting")
+	}
+	// Ожидаем реальное восстановление токена, не предполагая точность планировщика.
+	waitFor := func(method, path, body string) map[string]any {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			status, _, result := send(method, path, body, integrationAPIKey)
+			if status == 200 {
+				return result
+			}
+			if status != 429 || time.Now().After(deadline) {
+				t.Fatalf("request did not recover: %d", status)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if result := waitFor("GET", "/info/"+md5, ""); result["name"] != "secured" {
+		t.Fatal("data lost")
+	}
+	if result := waitFor("PUT", "/info/"+md5, `{"name":"updated"}`); result["name"] != "updated" {
+		t.Fatal("update failed")
+	}
+	pool.Close()
+	if status, _, body := send("GET", "/readyz", "", ""); status != 503 || body["message"] != "Service unavailable" || body["details"] != "" {
+		t.Fatal("unavailable DB reported ready")
 	}
 }

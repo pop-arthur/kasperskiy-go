@@ -16,8 +16,10 @@ type responseWriter struct {
 	aborted bool
 }
 
+// Unwrap предоставляет исходный writer для http.ResponseController.
 func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+// WriteHeader запоминает первый итоговый статус для единого access-log.
 func (w *responseWriter) WriteHeader(status int) {
 	if w.status != 0 {
 		return
@@ -28,6 +30,7 @@ func (w *responseWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// Write учитывает неявный статус 200 при записи тела ответа.
 func (w *responseWriter) Write(body []byte) (int, error) {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
@@ -75,14 +78,13 @@ func recoverPanics(next http.Handler) http.Handler {
 					panic(value)
 				}
 				state := w.(*responseWriter)
-				// Do not log an arbitrary panic value, which could contain request data.
 				state.recordFailure(fmt.Errorf("panic in HTTP handler (%T)", value))
 				state.stack = debug.Stack()
 				if state.status != 0 {
 					state.aborted = true
 					panic(http.ErrAbortHandler)
 				}
-				respond(w, http.StatusInternalServerError, errorResponse{Message: "Internal server error"})
+				respond(w, http.StatusInternalServerError, ErrorResponse{Message: "Internal server error"})
 			}
 		}()
 		next.ServeHTTP(w, r)

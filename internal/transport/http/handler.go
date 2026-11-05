@@ -1,4 +1,4 @@
-// Package httptransport adapts threat use cases to the REST API.
+// Package httptransport обслуживает REST API по контракту OpenAPI.
 package httptransport
 
 import (
@@ -9,10 +9,13 @@ import (
 	"kaspersky-go-test/internal/domain"
 )
 
-// ThreatService is the HTTP consumer's interface; it is implemented by usecase.ThreatService.
+// ThreatService задаёт операции для HTTP-обработчиков; предметные ошибки преобразует в HTTP-ответы транспорт.
 type ThreatService interface {
+	// GetByMD5 находит угрозу по MD5, принятому в HTTP-пути.
 	GetByMD5(context.Context, string) (domain.Threat, error)
+	// Create сохраняет угрозу после предметной валидации.
 	Create(context.Context, string, domain.ThreatData) (domain.Threat, error)
+	// Update заменяет изменяемые поля существующей угрозы.
 	Update(context.Context, string, domain.ThreatData) (domain.Threat, error)
 }
 
@@ -21,14 +24,13 @@ type handler struct {
 	maxBodyBytes int64
 }
 
-// NewHandler builds the API without I/O. Dependencies must be non-nil and the
-// body limit positive; invalid configuration panics before serving requests.
-func NewHandler(service ThreatService, logger *slog.Logger, maxBodyBytes int64) http.Handler {
+// NewHandler собирает маршруты и защиту API; вызывает panic при nil-зависимостях, пустом ключе или неположительных лимитах и таймауте readiness.
+func NewHandler(service ThreatService, logger *slog.Logger, maxBodyBytes int64, security SecurityOptions) http.Handler {
 	if service == nil || logger == nil || maxBodyBytes <= 0 {
 		panic("HTTP handler requires service, logger, and a positive body limit")
 	}
 	h := &handler{service: service, maxBodyBytes: maxBodyBytes}
-	return requestLogging(logger, recoverPanics(h.router()))
+	return requestLogging(logger, recoverPanics(protect(h.router(), security)))
 }
 
 func (h *handler) ready(w http.ResponseWriter, r *http.Request, operation string) bool {

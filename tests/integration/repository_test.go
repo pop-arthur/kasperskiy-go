@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -24,13 +23,10 @@ var _ usecase.ThreatRepository = (*postgres.ThreatRepository)(nil)
 
 func newRepository(t *testing.T) (context.Context, *pgxpool.Pool, *postgres.ThreatRepository) {
 	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("TEST_DATABASE_URL is required; use make test-repository for an isolated database")
-	}
+	dsn := suiteDSN
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		t.Fatal("parse TEST_DATABASE_URL: invalid connection configuration")
+		t.Fatal("parse test database: invalid connection configuration")
 	}
 	config.MaxConns = 4
 	config.ConnConfig.ConnectTimeout = 5 * time.Second
@@ -46,7 +42,7 @@ func newRepository(t *testing.T) (context.Context, *pgxpool.Pool, *postgres.Thre
 	if err := pool.Ping(ctx); err != nil {
 		t.Fatalf("ping database: %v", err)
 	}
-	return ctx, pool, postgres.NewThreatRepository(pool)
+	return ctx, pool, postgres.NewThreatRepository(pool, 5*time.Second)
 }
 
 func key(t *testing.T) domain.MD5 {
@@ -193,9 +189,7 @@ func TestRepositoryUpdate(t *testing.T) {
 		{Name: "renamed", Description: ptr("new")},
 		{Name: "", Description: ptr("")},
 		{Name: " "},
-		{Name: " "}, // Same values must still assign updated_at.
-	} {
-		// A known old timestamp verifies assignment without timing sleeps.
+		{Name: " "}} {
 		if _, err := pool.Exec(ctx, "UPDATE public.threats SET updated_at='2000-01-01T00:00:00Z' WHERE md5=$1", string(md5)); err != nil {
 			t.Fatal(err)
 		}
@@ -216,14 +210,12 @@ func TestRepositoryUpdate(t *testing.T) {
 
 func TestRepositoryPreservesTechnicalErrors(t *testing.T) {
 	ctx, pool, repo := newRepository(t)
-	// This deliberately violates the repository's validated-input precondition.
 	_, err := repo.Create(ctx, domain.MD5("bad"), domain.ThreatData{Name: "invalid"})
 	var pgError *pgconn.PgError
 	if !errors.As(err, &pgError) || pgError.Code != "23514" || errors.Is(err, domain.ErrThreatAlreadyExists) {
 		t.Fatalf("expected wrapped CHECK violation, got %v", err)
 	}
 
-	// A different unique constraint must not be reported as a duplicate MD5.
 	_, err = pool.Exec(ctx, `CREATE UNIQUE INDEX threats_description_test_key
 		ON public.threats (description) WHERE description LIKE 'unique-test-marker-%'`)
 	if err != nil {
@@ -314,8 +306,6 @@ func TestRepositoryCancellationDuringUpdate(t *testing.T) {
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// Cancellation can return before the server observes the disconnected client.
-	// Do not infer rollback from a context error after releasing the row lock.
 	if _, err := repo.GetByMD5(ctx, md5); err != nil {
 		t.Fatalf("pool did not recover after cancellation: %v", err)
 	}

@@ -91,7 +91,6 @@ func TestThreatServiceNormalizesAndDelegates(t *testing.T) {
 	for _, op := range operations {
 		for _, raw := range []string{canonicalMD5, strings.ToUpper(canonicalMD5), "D41d8cD98f00b204e9800998ecf8427E"} {
 			t.Run(op.name+"/"+raw, func(t *testing.T) {
-				// A constructor must not make a repository call.
 				repo := &repositoryFake{t: t, result: fixtureThreat()}
 				service := usecase.NewThreatService(repo)
 				repo.expected = op.name
@@ -125,7 +124,6 @@ func TestThreatServiceRejectsInvalidMD5BeforeRepository(t *testing.T) {
 		for _, raw := range []string{"", "short", strings.Repeat("g", 32), canonicalMD5 + " ", canonicalMD5 + "\n"} {
 			t.Run(op.name+"/"+raw, func(t *testing.T) {
 				repo := &repositoryFake{t: t}
-				// Invalid fields too: MD5 validation must take precedence.
 				got, err := op.call(usecase.NewThreatService(repo), context.Background(), raw, domain.ThreatData{Name: "\x00"})
 				requireError(t, got, err, domain.ErrInvalidMD5)
 			})
