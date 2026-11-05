@@ -4,7 +4,7 @@ IMAGE ?= kasperski-go-test:local
 
 .PHONY: help fmt vet test check build run docker-build docker-run
 help:
-	@echo "Targets: fmt vet test check build run docker-build docker-run db-up db-down db-shell migrate-up migrate-down migrate-version test-db"
+	@echo "Targets: fmt vet test check build run docker-build docker-run db-up db-down db-shell migrate-up migrate-down migrate-version test-db test-repository"
 
 fmt:
 	$(GO) fmt ./...
@@ -37,7 +37,7 @@ docker-run:
 COMPOSE ?= docker compose
 MIGRATE = $(COMPOSE) run --rm migrate -path /migrations -database 'postgres://postgres:5432/?sslmode=disable'
 
-.PHONY: db-up db-down db-shell migrate-up migrate-down migrate-version test-db
+.PHONY: db-up db-down db-shell migrate-up migrate-down migrate-version test-db test-repository
 
 db-up:
 	$(COMPOSE) up -d --wait postgres
@@ -60,3 +60,7 @@ migrate-version:
 
 test-db:
 	python3 tests/integration/check_database.py
+
+# Requires Docker Compose and Python 3; creates and removes an isolated test DB.
+test-repository:
+	python3 tests/integration/check_database.py --repository

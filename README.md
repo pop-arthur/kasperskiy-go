@@ -1,17 +1,18 @@
-# Kaspersky Go test — Bootstrap
+# Kaspersky Go test
 
 Основа Go REST-сервиса для сведений о компьютерных угрозах по MD5.
 Будущий API: GET /info/{md5}, POST /info, PUT /info/{md5}.
-Сейчас создан только каркас: проверка LOG_LEVEL, JSON-лог и выход.
-Сервер, эндпоинты, бизнес-логика и Go-адаптер хранения ещё не реализованы.
-Добавлены PostgreSQL в Compose, SQL-миграция таблицы и проверка инфраструктуры.
+Реализованы доменная модель/валидация, PostgreSQL repository layer, миграция
+и изолированные проверки на реальной БД. Сервер, эндпоинты и usecase-сценарии
+ещё отсутствуют: cmd/api по-прежнему проверяет LOG_LEVEL, пишет JSON-лог и выходит.
 
 ## Стек
 
 Go 1.27.3 ([официальные релизы](https://go.dev/dl/)), стандартная библиотека,
-log/slog, будущий net/http и testing/httptest. Внешних Go-зависимостей нет.
+log/slog, будущий net/http и testing/httptest. Единственная прямая Go-зависимость
+— pgx/v5 v5.12.0 (с его транзитивными зависимостями).
 Прагматичная Clean Architecture, DI через конструкторы при добавлении слоёв.
-PostgreSQL 18.6, будущий драйвер pgx/v5 v5.12.0, мигратор golang-migrate v4.20.1. Module path kasperski-go-test локальный: URL репозитория неизвестен.
+PostgreSQL 18.6, драйвер pgx/v5 v5.12.0, мигратор golang-migrate v4.20.1. Module path kasperski-go-test локальный: URL репозитория неизвестен.
 
 ## Структура и контекст
 
@@ -26,11 +27,16 @@ PostgreSQL 18.6, будущий драйвер pgx/v5 v5.12.0, мигратор 
 ├── README.md
 ├── cmd/api/main.go
 ├── compose.yaml
+├── internal/
+│   ├── domain/                 # MD5, модель, валидация и unit tests
+│   ├── usecase/                # Интерфейс ThreatRepository
+│   └── repository/postgres/    # Конкретный pgx-адаптер
 ├── migrations/
 │   ├── 000001_create_threats.up.sql
 │   └── 000001_create_threats.down.sql
 ├── tests/integration/
 │   ├── check_database.py
+│   ├── repository_test.go
 │   └── schema.sql
 ├── docs/
 │   ├── backend/
@@ -43,7 +49,8 @@ PostgreSQL 18.6, будущий драйвер pgx/v5 v5.12.0, мигратор 
 │   ├── REQUIREMENTS.md
 │   ├── TASK_SOURCE.md
 │   └── TASKS.md
-└── go.mod
+├── go.mod
+└── go.sum
 ```
 
 Начать следующую сессию с [AGENTS.md](AGENTS.md),
@@ -55,10 +62,11 @@ PostgreSQL 18.6, будущий драйвер pgx/v5 v5.12.0, мигратор 
 [docs/database/README.md](docs/database/README.md). Предложения из пересказа
 отмечены отдельно от обязательного поведения. Контракт repository layer
 сохранён в [docs/backend/REPOSITORY.md](docs/backend/REPOSITORY.md);
-реализация адаптера ещё не начата.
+адаптер реализован в internal/repository/postgres.
 
-Будущие internal/domain, usecase, repository, transport/http и config
-будут созданы вместе с кодом. tests/integration уже содержит проверку БД. Пустых пакетов нет.
+internal/domain содержит модель и валидацию, internal/usecase — интерфейс
+хранилища, internal/repository/postgres — адаптер. HTTP transport, config
+и usecase-сценарии будут добавлены с реализацией сервера. Пустых пакетов нет.
 
 ## Локальная сборка и проверки
 
@@ -76,8 +84,9 @@ make run
 ```
 
 `make check` выполняет fmt/vet/test; `make fmt`, `make vet`, `make test`
-доступны отдельно. Сборка создаёт bin/api. Тестовых файлов Go пока нет:
-[no test files] — проверка компиляции пакета, не покрытие функциональности.
+доступны отдельно. Сборка создаёт bin/api. Обычный go test ./... выполняет
+unit tests доменной валидации и не требует БД. Тесты адаптера на реальной
+PostgreSQL запускаются отдельно через make test-repository.
 
 ## Конфигурация и запуск каркаса
 
@@ -131,11 +140,15 @@ Compose читает .env, Go-каркас его автоматически н�
 - make migrate-down — откатить одну миграцию: удалит таблицу threats и её данные.
 - make test-db — проверить миграции и сохранность данных в изолированном
   Compose-проекте (нужен Python 3, сторонних пакетов не требуется).
+- make test-repository — 11 Go integration tests адаптера с -race в отдельной
+  PostgreSQL с миграцией. Runner сам создаёт TEST_DATABASE_URL и удаляет
+  только свой тестовый том; локальный .env и обычная БД не используются.
 
 Подробности — в [docs/database/README.md](docs/database/README.md).
 
 ## Следующий этап
 
 Модель БД, версии инфраструктуры и контракт API согласованы (ADR-006/007/008).
-Далее реализовать предметную модель, pgx-репозиторий и первый сценарий
-создания по docs/TASKS.md. Реализацию начинать по отдельной задаче.
+Доменная модель и pgx-репозиторий реализованы (ADR-010). Далее — первый
+usecase-сценарий создания, затем конфигурация/жизненный цикл пула и HTTP
+по docs/TASKS.md. Реализацию начинать по отдельной задаче.

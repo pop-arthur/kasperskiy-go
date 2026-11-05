@@ -1,17 +1,22 @@
 """Verify actual migrations and persistence in an isolated Compose project."""
 
+import argparse
 import os
 from pathlib import Path
 import secrets
 import subprocess
 import tempfile
 import uuid
+from urllib.parse import quote
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repository", action="store_true", help="run Go repository tests instead of migration smoke tests")
+    args = parser.parse_args()
     project = "threats-check-" + uuid.uuid4().hex[:12]
     env = dict(os.environ)
     env.update(
@@ -60,6 +65,21 @@ def main():
             assert sql("SHOW server_version;").startswith("18.6"), "Wrong PostgreSQL version"
             migrate("up")
             assert sql("SELECT version, dirty FROM public.schema_migrations;") == "1|f"
+            if args.repository:
+                address = run("port", "postgres", "5432")
+                port = address.rsplit(":", 1)[1]
+                test_env = dict(env)
+                test_env["TEST_DATABASE_URL"] = (
+                    "postgres://" + quote(env["POSTGRES_USER"], safe="") + ":"
+                    + quote(env["POSTGRES_PASSWORD"], safe="")
+                    + "@127.0.0.1:" + port + "/" + quote(env["POSTGRES_DB"], safe="")
+                    + "?sslmode=disable"
+                )
+                subprocess.run(
+                    ["go", "test", "-race", "-tags=integration", "-count=1", "-v", "./tests/integration"],
+                    cwd=ROOT, env=test_env, check=True,
+                )
+                return
             migrate("up")  # Repeated up must leave the existing schema unchanged.
             sql((ROOT / "tests/integration/schema.sql").read_text())
             print("PASS: migration up, repeated up, constraints and defaults", flush=True)
