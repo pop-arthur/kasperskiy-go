@@ -3,7 +3,7 @@
 Основа Go REST-сервиса для сведений о компьютерных угрозах по MD5.
 Будущий API: GET /info/{md5}, POST /info, PUT /info/{md5}.
 Реализованы доменная модель/валидация, PostgreSQL repository layer, миграция
-и изолированные проверки на реальной БД. Сервер, эндпоинты и usecase-сценарии
+и три сервисных сценария с unit/integration tests. Сервер и эндпоинты
 ещё отсутствуют: cmd/api по-прежнему проверяет LOG_LEVEL, пишет JSON-лог и выходит.
 
 ## Стек
@@ -29,7 +29,7 @@ PostgreSQL 18.6, драйвер pgx/v5 v5.12.0, мигратор golang-migrate 
 ├── compose.yaml
 ├── internal/
 │   ├── domain/                 # MD5, модель, валидация и unit tests
-│   ├── usecase/                # Интерфейс ThreatRepository
+│   ├── usecase/                # ThreatService, ThreatRepository и unit tests
 │   └── repository/postgres/    # Конкретный pgx-адаптер
 ├── migrations/
 │   ├── 000001_create_threats.up.sql
@@ -37,9 +37,11 @@ PostgreSQL 18.6, драйвер pgx/v5 v5.12.0, мигратор golang-migrate 
 ├── tests/integration/
 │   ├── check_database.py
 │   ├── repository_test.go
+│   ├── service_test.go
 │   └── schema.sql
 ├── docs/
 │   ├── backend/
+│   │   ├── SERVICE.md
 │   │   ├── REPOSITORY.md
 │   │   ├── openapi.original.yaml
 │   │   └── openapi.yaml
@@ -63,10 +65,12 @@ PostgreSQL 18.6, драйвер pgx/v5 v5.12.0, мигратор golang-migrate 
 отмечены отдельно от обязательного поведения. Контракт repository layer
 сохранён в [docs/backend/REPOSITORY.md](docs/backend/REPOSITORY.md);
 адаптер реализован в internal/repository/postgres.
+[Спецификация сервиса](docs/backend/SERVICE.md) реализована в
+internal/usecase/threat_service.go.
 
 internal/domain содержит модель и валидацию, internal/usecase — интерфейс
-хранилища, internal/repository/postgres — адаптер. HTTP transport, config
-и usecase-сценарии будут добавлены с реализацией сервера. Пустых пакетов нет.
+хранилища и сервис, internal/repository/postgres — адаптер. HTTP transport
+и config будут добавлены с реализацией сервера. Пустых пакетов нет.
 
 ## Локальная сборка и проверки
 
@@ -85,7 +89,7 @@ make run
 
 `make check` выполняет fmt/vet/test; `make fmt`, `make vet`, `make test`
 доступны отдельно. Сборка создаёт bin/api. Обычный go test ./... выполняет
-unit tests доменной валидации и не требует БД. Тесты адаптера на реальной
+unit tests доменной валидации и сервиса и не требует БД. Тесты адаптера на реальной
 PostgreSQL запускаются отдельно через make test-repository.
 
 ## Конфигурация и запуск каркаса
@@ -140,7 +144,7 @@ Compose читает .env, Go-каркас его автоматически н�
 - make migrate-down — откатить одну миграцию: удалит таблицу threats и её данные.
 - make test-db — проверить миграции и сохранность данных в изолированном
   Compose-проекте (нужен Python 3, сторонних пакетов не требуется).
-- make test-repository — 11 Go integration tests адаптера с -race в отдельной
+- make test-repository — 12 Go integration tests адаптера/сервиса с -race в отдельной
   PostgreSQL с миграцией. Runner сам создаёт TEST_DATABASE_URL и удаляет
   только свой тестовый том; локальный .env и обычная БД не используются.
 
@@ -149,6 +153,6 @@ Compose читает .env, Go-каркас его автоматически н�
 ## Следующий этап
 
 Модель БД, версии инфраструктуры и контракт API согласованы (ADR-006/007/008).
-Доменная модель и pgx-репозиторий реализованы (ADR-010). Далее — первый
-usecase-сценарий создания, затем конфигурация/жизненный цикл пула и HTTP
+Доменная модель, pgx-репозиторий и три usecase-сценария реализованы
+(ADR-010/011). Далее — конфигурация/жизненный цикл пула и HTTP
 по docs/TASKS.md. Реализацию начинать по отдельной задаче.

@@ -20,10 +20,10 @@ Docker собирает статический бинарник и запуск�
 | `cmd/api` | Composition root: чтение конфигурации, сборка зависимостей, жизненный цикл процесса |
 | `internal/config` | Планируется: чтение и проверка окружения для сервера |
 | `internal/domain` | Реализовано: MD5, ThreatData, Threat, валидация и ошибки без HTTP/SQL |
-| `internal/usecase` | Реализован интерфейс ThreatRepository; сценарии получения/создания/обновления ещё не реализованы |
+| `internal/usecase` | Реализованы ThreatRepository и ThreatService: GetByMD5/Create/Update с валидацией и unit tests |
 | `internal/repository/postgres` | Реализованы GetByMD5/Create/Update на pgxpool; уникальность MD5 обеспечивает БД |
 | `internal/transport/http` | Планируется: HTTP-маршрутизация, DTO и преобразование ошибок |
-| `tests/integration` | Реализованы SQL/Compose и Go repository tests; API tests планируются |
+| `tests/integration` | Реализованы SQL/Compose, repository и service + PostgreSQL tests; HTTP tests планируются |
 
 Подпакеты handler/middleware и infrastructure создавать только при
 необходимости. Сейчас их нет. Не размещать интерфейс репозитория в
@@ -37,7 +37,7 @@ DI-контейнер и глобальные зависимости не нуж
 Предполагаемый поток: HTTP → декодирование/валидация DTO → usecase →
 интерфейс хранилища → адаптер → результат → HTTP-ответ по OpenAPI.
 Будущая маршрутизация — stdlib net/http, если контракт не потребует иного.
-Часть хранения реализована; сервер, transport и usecase-сценарии ещё отсутствуют.
+Хранение и usecase-сценарии реализованы; сервер и HTTP transport ещё отсутствуют.
 
 ## Контракт repository layer
 
@@ -53,6 +53,20 @@ Domain/usecase проверяют и нормализуют данные до в
 сохраняет различие nil description и пустой строки, использует RETURNING
 и даты БД, не делает upsert или предварительный Exists. Пул создаёт и закрывает
 composition root; миграции остаются отдельным шагом (ADR-009).
+
+## Контракт сервисного слоя
+
+[Спецификация сервиса](backend/SERVICE.md) реализована в
+internal/usecase/threat_service.go и проверена unit/integration tests.
+Сервисный слой — это internal/usecase, дополнительный internal/service не нужен.
+ThreatService получает ThreatRepository через конструктор и предоставляет
+GetByMD5/Create/Update. Входной MD5 — сырая строка; сервис вызывает ParseMD5,
+а при записи — ThreatData.Validate, затем один соответствующий метод repository.
+Невалидные данные не доходят до хранилища. JSON/обязательность полей проверяет
+transport; даты/NULL/уникальность обеспечивает repository. Сервис передаёт
+ошибки без повторной обёртки, сохраняя их цепочку и errors.Is/As.
+HTTP, retry, транзакции и жизненный цикл пула в сервис не добавляются.
+Решение зафиксировано в ADR-011.
 
 ## Конфигурация и логирование
 
@@ -74,17 +88,20 @@ errors.Is/As. Transport сопоставит их с 400/404/409/500 и JSON mes
 
 ## Тестирование
 
-Unit-тесты Go проверяют domain.ParseMD5 и ThreatData.Validate.
-make test-repository проверяет Go-адаптер с реальной PostgreSQL, включая
+Unit-тесты Go проверяют domain.ParseMD5, ThreatData.Validate и все три
+сценария ThreatService на ручном fake репозитория, без БД.
+make test-repository проверяет Go-адаптер и цепочку service → repository
+с реальной PostgreSQL, включая
 гонки Create/Update, ошибки, NULL, UTC, context и deadline; включён -race.
 Пул создаёт тест, миграцию применяет изолированный Compose-runner.
 Есть make test-db: Python stdlib + Docker Compose проверяют реальные
 up/down-миграции, ограничения и сохранность данных после пересоздания
 контейнеров. Используется отдельный проект, порт и том; обычная БД не затрагивается.
-Unit tests сценариев и transport будут добавлены вместе с реализацией;
-использовать testing и httptest. Тестовые реализации
+Unit tests сервиса уже реализованы через testing; transport tests на
+httptest будут добавлены с HTTP-слоем. Тестовые реализации
 интерфейса писать вручную, когда это проще зависимости.
-В tests/integration есть check_database.py, schema.sql и repository_test.go.
+В tests/integration есть check_database.py, schema.sql, repository_test.go
+и service_test.go.
 Go integration tests включаются тегом integration и требуют отдельной
 тестовой TEST_DATABASE_URL; make test-repository создаёт её автоматически.
 Тесты цепочки HTTP → хранение, дубликатов и обновлений будут добавлены с API.

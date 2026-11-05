@@ -2,7 +2,8 @@
 
 Дата: 2026-11-05. Статус: контракт реализован (ADR-010).
 Доменные типы — internal/domain, интерфейс — internal/usecase/threat_repository.go,
-адаптер — internal/repository/postgres/threat.go. API и usecase-сценариев пока нет.
+адаптер — internal/repository/postgres/threat.go. Сервисные сценарии реализованы
+в internal/usecase/threat_service.go; HTTP API пока нет.
 
 Основание: [требования](../REQUIREMENTS.md), [OpenAPI 1.1.0](openapi.yaml),
 [схема БД](../database/README.md),
@@ -195,8 +196,8 @@ NewThreatRepository принимает caller-owned *pgxpool.Pool. Ожидае�
 возврат context.Canceled не гарантирует rollback; сервер может завершить
 запись до обнаружения разрыва соединения. Автоповторов нет.
 
-Далее реализовать usecase-сценарии и подключение/жизненный цикл пула
-в composition root. OpenAPI, схема таблицы и миграции не изменены.
+Usecase-сценарии реализованы поверх этого контракта (см. SERVICE.md).
+Далее — подключение/жизненный цикл пула в composition root и HTTP transport. OpenAPI, схема таблицы и миграции не изменены.
 
 Справочные источники технических деталей:
 

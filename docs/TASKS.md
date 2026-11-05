@@ -39,9 +39,12 @@
 
 ## 3. Сценарии
 
-- [ ] Получение: найденная запись, отсутствие, техническая ошибка — unit tests.
-- [ ] Создание: сохранение, некорректные данные и дубликат — unit tests.
-- [ ] Обновление: изменение согласованных полей, отсутствие записи и ошибка — unit tests.
+- [x] Определить спецификацию сервисного слоя: docs/backend/SERVICE.md, ADR-011; операции, валидация, ошибки, context и критерии unit tests.
+- [x] Реализовать ThreatService с конструктором от ThreatRepository и unit tests без БД по SERVICE.md.
+
+- [x] Получение: нормализация, найденная запись, отсутствие, техническая ошибка — unit tests.
+- [x] Создание: сохранение, некорректные данные и дубликат — unit tests.
+- [x] Обновление: замена полей, nil/пустое описание, отсутствие записи и ошибка — unit tests.
 
 ## 4. HTTP и запуск
 
@@ -211,3 +214,51 @@ context и причины технических ошибок доступны �
 Архитектура, REPOSITORY, AGENTS, README и ADR-010 синхронизированы.
 OpenAPI, SQL-миграции и Compose не изменены. API и usecase-сценарии,
 конфигурация/жизненный цикл пула в cmd/api остаются не реализованы.
+
+## Спецификация сервисного слоя — 2026-11-05
+
+Создан docs/backend/SERVICE.md и ADR-011: ThreatService в internal/usecase,
+три операции, constructor DI, обязательные ParseMD5/Validate до repository,
+полная замена полей при Update, ошибки, context и критерии будущих тестов.
+Уточнено разделение транспортной и доменной валидации; дополнительные
+service/usecase-слои, DTO, предварительные SELECT, retry и транзакции не нужны.
+Обновлены архитектура, AGENTS и README.
+
+Проверки: спецификация сопоставлена с OpenAPI, существующими domain-типами
+и интерфейсом ThreatRepository. Локальные Markdown-ссылки и whitespace
+проверены. make check (fmt/vet/test) прошёл. Go-код, OpenAPI, миграции,
+Compose и зависимости не изменялись; тесты PostgreSQL повторно не запускались.
+Сервис и его тесты ещё не реализованы; завершено только определение контракта.
+
+
+## Реализация ThreatService — 2026-11-05
+
+Добавлен internal/usecase/threat_service.go: конструктор от ThreatRepository,
+GetByMD5/Create/Update, ctx.Err на входе, ParseMD5 и Validate перед хранилищем,
+ровно один repository-вызов для валидного запроса. Результат хранилища
+возвращается без изменения полей/дат; при ошибке — нулевая Threat.
+Ошибки передаются без повторной обёртки и сохраняют errors.Is/As.
+Поздний context.Canceled не подменяет полученный успех или техническую причину.
+
+Добавлены ручной fake и unit tests на нормализацию, валидацию, порядок
+проверок, передачу аргументов/context, NULL/пустые строки, ошибки и отсутствие
+повторных/предварительных обращений. Сквозной TestThreatServiceWithPostgres
+проверяет Create uppercase → Get → Update с очисткой описания → дубликат,
+отсутствие записи и доменные ошибки на реальном адаптере.
+
+Фактические проверки:
+
+| Проверка | Результат |
+| --- | --- |
+| make check | fmt/vet/test прошли |
+| go test -race ./... | Все unit tests прошли, гонок не обнаружено |
+| go test -cover ./internal/usecase | 100% statements сервисного пакета покрыты unit tests |
+| make test-repository | 12 integration tests repository/service прошли на PostgreSQL 18.6 с -race; тестовый проект/том удалены |
+| go vet -tags=integration ./... | Успех |
+| make build | Успех |
+| Документация | Обновлены SERVICE, REPOSITORY, ARCHITECTURE, REQUIREMENTS, ADR-011, AGENTS и README; локальные ссылки/whitespace проверены |
+
+Новых зависимостей нет. HTTP, cmd/api, конфигурация, repository, OpenAPI,
+SQL-миграции и Compose не изменены. Docker и migration smoke tests отдельно
+не повторялись: их конфигурация и SQL не менялись; новая цепочка проверена
+существующим изолированным runner на той же миграции.

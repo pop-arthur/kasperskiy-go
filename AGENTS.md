@@ -10,7 +10,8 @@ PUT /info/{md5}. Перед реализацией расширить модел
 
 Bootstrap завершён; отдельной задачей добавлены SQL-миграция и запуск БД.
 Реализованы доменные типы/валидация, интерфейс хранилища и pgx-адаптер.
-Usecase-сценарии, эндпоинты, обработчики и подключение API к БД ещё не реализованы.
+Реализован ThreatService: GetByMD5/Create/Update с валидацией перед repository.
+Эндпоинты, HTTP-обработчики и подключение API к БД ещё не реализованы.
 Последующие изменения делать в объёме новой задачи.
 
 ## Обязательный порядок работы
@@ -42,14 +43,17 @@ pgx/v5 v5.12.0 и golang-migrate v4.20.1 (ADR-008). Драйвер добавл�
 Контракт repository layer описан в docs/backend/REPOSITORY.md (ADR-009):
 GetByMD5/Create/Update, интерфейс у usecase, pgx-адаптер в repository/postgres;
 Go-интерфейс, типы и адаптер созданы; детали реализации — ADR-010. Перед реализацией репозитория прочитать
-этот контракт. Java/Spring из пересказа не применять.
+этот контракт. Спецификация сервисного слоя — docs/backend/SERVICE.md
+(ADR-011): сервис равен usecase, сам вызывает ParseMD5/Validate перед
+repository. ThreatService реализован и проверен unit/integration tests.
+Перед изменениями читать спецификацию. Java/Spring из пересказа не применять.
 
 Сейчас cmd/api содержит только проверку LOG_LEVEL и JSON-логирование с
 завершением процесса. docs содержит требования, архитектуру, ADR, задачи
 и источник. Makefile/Dockerfile обеспечивают сборку и запуск каркаса.
 
 internal/domain — MD5, ThreatData, Threat, валидация и предметные ошибки;
-internal/usecase — интерфейс ThreatRepository, сценарии ещё не реализованы;
+internal/usecase — ThreatRepository и ThreatService с тремя сценариями и unit tests;
 internal/repository/postgres — адаптер трёх операций с caller-owned pgxpool;
 tests/integration — SQL/Compose и Go-репозиторий с реальной PostgreSQL.
 Будущие internal/transport/http — DTO/HTTP и преобразование ошибок;
@@ -101,7 +105,7 @@ make migrate-down откатывает одну миграцию и удаляе
 проверку схемы в отдельном случайно названном Compose-проекте и удаляет
 только его том; нужны Docker Compose и Python 3. make test-repository
 использует тот же изолированный запуск, применяет миграцию и выполняет
-Go integration tests с build tag integration и race detector. Обычный
+Go integration tests repository и service с build tag integration и race detector. Обычный
 go test ./... не обращается к БД. Не запускать эти integration tests
 на рабочей БД: они создают тестовые данные и временный индекс.
 
